@@ -148,9 +148,20 @@ func convertLatexToMathML(latex string) (string, error) {
 	script := `
 		var mathmlString;
 		try {
-			mathmlString = katex.renderToString(latexInput, { output: "mathml", throwOnError: false });
+			var rawMathML = katex.renderToString(latexInput, { output: "mathml", throwOnError: false });
+			// Function to convert non-ASCII characters to XML numeric entities
+			function toXmlEntities(str) {
+				if (typeof str !== 'string') return str;
+				return str.replace(/[^\x00-\x7F]/g, function(c) {
+					return "&#" + c.charCodeAt(0) + ";";
+				});
+			}
+			mathmlString = toXmlEntities(rawMathML);
 		} catch (e) {
-			mathmlString = '<math><merror><mtext>' + e.toString() + '</mtext></merror></math>';
+			var errorText = e.toString();
+			// Attempt to make the error message ASCII-safe as well
+			try { errorText = toXmlEntities(errorText); } catch (e2) { /* ignore secondary error during error text conversion */ }
+			mathmlString = '<math><merror><mtext>' + errorText + '</mtext></merror></math>';
 		}
 		mathmlString;
 	`

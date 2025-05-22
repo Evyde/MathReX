@@ -27,7 +27,7 @@ import (
 
 // Modifier key constants are no longer needed here as hook.Register uses strings.
 
-//go:embed onnxruntime model katex.min.js mathml2omml.js
+//go:embed all:onnxruntime all:model katex.min.js mathml2omml.js
 var embeddedFS embed.FS
 
 type AppSettings struct {
@@ -287,23 +287,28 @@ func getDefaultSharedLibEmbedPath() string {
 	if runtime.GOOS == "windows" {
 		if runtime.GOARCH == "amd64" {
 			// DLL name usually doesn't include version
-			return fmt.Sprintf("lib/onnxruntime/amd64_windows/onnxruntime.dll")
+			return fmt.Sprintf("onnxruntime/amd64_windows/onnxruntime.dll")
+		}
+
+		if runtime.GOARCH == "arm64" {
+			// DLL name usually doesn't include version
+			return fmt.Sprintf("onnxruntime/arm64_windows/onnxruntime.dll")
 		}
 	}
 	if runtime.GOOS == "darwin" {
 		if runtime.GOARCH == "arm64" {
-			return fmt.Sprintf("lib/onnxruntime/arm64_darwin/libonnxruntime.%s.dylib", onnxVersion)
+			return fmt.Sprintf("onnxruntime/arm64_darwin/libonnxruntime.%s.dylib", onnxVersion)
 		}
 		if runtime.GOARCH == "amd64" {
-			return fmt.Sprintf("lib/onnxruntime/amd64_darwin/libonnxruntime.%s.dylib", onnxVersion)
+			return fmt.Sprintf("onnxruntime/amd64_darwin/libonnxruntime.%s.dylib", onnxVersion)
 		}
 	}
 	if runtime.GOOS == "linux" {
 		// Assuming .so for Linux, and versioned name similar to dylib
 		if runtime.GOARCH == "arm64" {
-			return fmt.Sprintf("lib/onnxruntime/arm64_linux/libonnxruntime.%s.so", onnxVersion)
+			return fmt.Sprintf("onnxruntime/arm64_linux/libonnxruntime.%s.so", onnxVersion)
 		}
-		return fmt.Sprintf("lib/onnxruntime/amd64_linux/libonnxruntime.%s.so", onnxVersion)
+		return fmt.Sprintf("onnxruntime/amd64_linux/libonnxruntime.%s.so", onnxVersion)
 	}
 	log.Printf("Error: Unable to determine embedded onnxruntime path for OS=%s Arch=%s\n", runtime.GOOS, runtime.GOARCH)
 	return ""
@@ -872,5 +877,8 @@ func processImageFile(imagePath string) {
 		dialog.Message("Failed to copy to clipboard: %v\n\nResult was:\n%s", err, resultText).Title("Clipboard Error").Error()
 	} else {
 		log.Printf("Result (%s) copied to clipboard.", currentSettings.OutputFormat)
+		// Show success notification
+		successMessage := fmt.Sprintf("Recognition successful!\nFormat: %s\n\nResult copied to clipboard.", currentSettings.OutputFormat)
+		go dialog.Message(successMessage).Title("Success").Info()
 	}
 }

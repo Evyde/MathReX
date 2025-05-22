@@ -18,9 +18,9 @@ TARGET_PLATFORMS = [
     ("osx", "x86_64", "darwin", "amd64", "tgz", "onnxruntime-osx-x86_64-{version}.tgz"), # Changed "x64" to "x86_64" for GitHub arch
     ("osx", "arm64", "darwin", "arm64", "tgz", "onnxruntime-osx-arm64-{version}.tgz"),
     # 可以根据需要添加更多平台，例如 Linux
-    # ("linux", "x64", "linux", "amd64", "tgz", "onnxruntime-linux-x64-{version}.tgz"),
-    # ("linux", "aarch64", "linux", "arm64", "tgz", "onnxruntime-linux-aarch64-{version}.tgz"),
-    # ("win", "arm64", "windows", "arm64", "zip", "onnxruntime-win-arm64-{version}.zip"),
+    ("linux", "x64", "linux", "amd64", "tgz", "onnxruntime-linux-x64-{version}.tgz"),
+    ("linux", "aarch64", "linux", "arm64", "tgz", "onnxruntime-linux-aarch64-{version}.tgz"),
+    ("win", "arm64", "windows", "arm64", "zip", "onnxruntime-win-arm64-{version}.zip"),
 ]
 
 # 项目中 onnxruntime 库的基础路径

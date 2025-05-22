@@ -1,0 +1,214 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*' # 触发条件：当一个以 'v' 开头的标签被推送时
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+    permissions:
+      contents: write
+    steps:
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref_name }}
+          release_name: Release ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+
+  build-and-upload:
+    needs: create-release # 确保 release 创建后再执行构建和上传
+    strategy:
+      matrix:
+        include:
+          # - os: ubuntu-latest
+          #   goos: linux
+          #   goarch: amd64
+          #   asset_name_suffix: ""
+          #   rust_target: x86_64-unknown-linux-gnu
+          # - os: ubuntu-latest
+          #   goos: linux
+          #   goarch: arm64
+          #   asset_name_suffix: ""
+          #   rust_target: aarch64-unknown-linux-gnu
+          - os: macos-latest
+            goos: darwin
+            goarch: amd64
+            asset_name_suffix: ""
+            rust_target: x86_64-apple-darwin
+          - os: macos-latest
+            goos: darwin
+            goarch: arm64
+            asset_name_suffix: ""
+            rust_target: aarch64-apple-darwin
+          - os: windows-latest
+            goos: windows
+            goarch: amd64
+            asset_name_suffix: .exe
+            rust_target: x86_64-pc-windows-gnu
+          # Windows ARM64 is more complex to set up for Rust cross-compilation, skipping for now.
+          # - os: windows-latest
+          #   goos: windows
+          #   goarch: arm64
+          #   asset_name_suffix: .exe
+          #   rust_target: aarch64-pc-windows-msvc # or gnu
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write # 需要写入权限来上传 release assets
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Set UTF-8 Locale
+        run: |
+          echo "LANG=en_US.UTF-8" >> $GITHUB_ENV
+          echo "LC_ALL=en_US.UTF-8" >> $GITHUB_ENV
+          echo "LANGUAGE=en_US.UTF-8" >> $GITHUB_ENV
+        shell: bash
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          targets: ${{ matrix.rust_target }} # Ensure the target for cross-compilation is installed
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install Python dependencies
+        run: pip install requests
+
+      - name: Run download_onnxruntime.py
+        run: python download_onnxruntime.py
+        # IMPORTANT: This script (located at backend/Go/Git/download_onnxruntime.py) MUST correctly
+        # download and place libraries for the specific GOOS/GOARCH into the paths expected by the
+        # Makefile (backend/Go/Git/Makefile).
+        # It should NOT download libtokenizers.a as we are building it from source.
+
+      - name: Build tokenizers library
+        shell: bash
+        run: |
+          set -e # Exit immediately if a command exits with a non-zero status.
+          echo "Building tokenizer for GOOS=${{ matrix.goos }}, GOARCH=${{ matrix.goarch }}, RUST_TARGET=${{ matrix.rust_target }}"
+          
+          TOKENIZERS_REPO_DIR=../tokenizers_src_temp # Temporary directory for cloning
+          
+          echo "Cloning daulet/tokenizers..."
+          git clone --depth 1 https://github.com/daulet/tokenizers.git $TOKENIZERS_REPO_DIR
+          cd $TOKENIZERS_REPO_DIR
+          
+          echo "Building libtokenizers.a with Cargo for target ${{ matrix.rust_target }}..."
+          cargo build --release --target ${{ matrix.rust_target }}
+          
+          SOURCE_LIB_PATH="target/${{ matrix.rust_target }}/release/libtokenizers.a"
+          DEST_DIR="${{ github.workspace }}/libtokenizers/${{ matrix.goos }}_${{ matrix.goarch }}"
+          DEST_LIB_PATH="$DEST_DIR/libtokenizers.a"
+          
+          echo "Source library path: $SOURCE_LIB_PATH"
+          echo "Destination directory: $DEST_DIR"
+          
+          if [ ! -f "$SOURCE_LIB_PATH" ]; then
+            echo "Build failed: $SOURCE_LIB_PATH not found!"
+            exit 1
+          fi
+          
+          echo "Creating destination directory: $DEST_DIR"
+          mkdir -p "$DEST_DIR"
+          
+          echo "Copying $SOURCE_LIB_PATH to $DEST_LIB_PATH"
+          cp "$SOURCE_LIB_PATH" "$DEST_LIB_PATH"
+          
+          echo "Successfully built and copied libtokenizers.a"
+          cd ../.. # Return to original directory or a known base for next steps
+
+      # Windows specific setup for CGO - May be needed if Rust on Windows can't find a linker
+      # - name: Setup MinGW (Windows)
+      #   if: matrix.goos == 'windows'
+      #   uses: egor-tensin/setup-mingw@v2
+      #   with:
+      #     arch: x64 # or x86
+
+      - name: Get CGO_LDFLAGS (Unix-like)
+        if: matrix.os != 'windows-latest'
+        id: cgo_ldflags_unix
+        run: |
+          LDFLAGS_VALUE=$(make -s print-cgo-ldflags)
+          echo "Extracted CGO_LDFLAGS: $LDFLAGS_VALUE"
+          echo "cgo_ldflags_value=$LDFLAGS_VALUE" >> $GITHUB_OUTPUT
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+
+      - name: Get CGO_LDFLAGS (Windows)
+        if: matrix.os == 'windows-latest'
+        id: cgo_ldflags_windows
+        shell: pwsh
+        run: |
+          $LDFLAGS_VALUE = (make -s print-cgo-ldflags | Out-String).Trim()
+          Write-Host "Original CGO_LDFLAGS from make: $LDFLAGS_VALUE"
+          # Attempt to remove -ldl if it's present. This is a speculative fix.
+          $LDFLAGS_VALUE_CLEANED = $LDFLAGS_VALUE -replace '-ldl\b', '' # \b for word boundary
+          $LDFLAGS_VALUE_CLEANED = $LDFLAGS_VALUE_CLEANED -replace '\s\s+', ' ' # Replace multiple spaces with single
+          $LDFLAGS_VALUE_CLEANED = $LDFLAGS_VALUE_CLEANED.Trim()
+          Write-Host "Cleaned CGO_LDFLAGS (attempted -ldl removal): $LDFLAGS_VALUE_CLEANED"
+          "cgo_ldflags_value=$LDFLAGS_VALUE_CLEANED" | Add-Content -Path $env:GITHUB_OUTPUT
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+
+      - name: Build application for ${{ matrix.goos }}/${{ matrix.goarch }}
+        run: |
+          if [ "${{ matrix.goos }}" == "darwin" ]; then
+            make build-macos-app
+          else
+            make build
+          fi
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          MACOSX_DEPLOYMENT_TARGET: ${{ matrix.goos == 'darwin' && '10.15' || '' }}
+          CGO_ENABLED: 1
+          CGO_LDFLAGS: ${{ (matrix.os == 'windows-latest' && steps.cgo_ldflags_windows.outputs.cgo_ldflags_value) || steps.cgo_ldflags_unix.outputs.cgo_ldflags_value }}
+          # For Windows, ensure CC is set if CGO_ENABLED=1 and not automatically found.
+          # setup-mingw should put gcc in PATH. If CGO still fails, uncommenting and setting CC might be needed.
+          # CC: gcc
+
+      - name: Add executable permissions (Linux/non-App macOS)
+        if: (matrix.goos == 'linux') || (matrix.goos == 'darwin' && matrix.asset_name_suffix != '.zip')
+        run: chmod +x bin/MathReX-${{ matrix.goos }}-${{ matrix.goarch }}
+
+      - name: Package macOS .app into a .zip
+        if: matrix.goos == 'darwin'
+        run: |
+          cd bin
+          zip -r MathReX-${{ matrix.goos }}-${{ matrix.goarch }}.zip MathReX.app
+          cd ..
+        # The asset_name_suffix for darwin should now reflect .zip
+
+      - name: Upload Release Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          asset_path: ${{ matrix.goos == 'darwin' && format('bin/MathReX-{0}-{1}.zip', matrix.goos, matrix.goarch) || format('bin/MathReX-{0}-{1}{2}', matrix.goos, matrix.goarch, matrix.asset_name_suffix) }}
+          asset_name: ${{ matrix.goos == 'darwin' && format('MathReX-{0}-{1}.app.zip', matrix.goos, matrix.goarch) || format('MathReX-{0}-{1}{2}', matrix.goos, matrix.goarch, matrix.asset_name_suffix) }}
+          asset_content_type: ${{ matrix.goos == 'darwin' && 'application/zip' || 'application/octet-stream' }}
