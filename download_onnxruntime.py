@@ -24,8 +24,8 @@ TARGET_PLATFORMS = [
 ]
 
 # 项目中 onnxruntime 库的基础路径
-LIB_BASE_PATH = Path(__file__) / "onnxruntime"
-TEMP_DOWNLOAD_DIR = Path(__file__) / "onnxruntime" / "temp_onnx_download"
+LIB_BASE_PATH = Path(__file__).parent / "onnxruntime"
+TEMP_DOWNLOAD_DIR = Path(__file__).parent / "onnxruntime" / "temp_onnx_download"
 
 def download_file(url, dest_path):
     """下载文件到指定路径"""
