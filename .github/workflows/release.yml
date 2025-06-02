@@ -224,6 +224,9 @@ jobs:
 
           # Build with the new implementations
           echo "Building with CGO enabled and Windows-compatible tokenizers..."
+          # Add C++ standard library for Windows (required for tokenizers C++ code)
+          export CGO_LDFLAGS="$CGO_LDFLAGS -lstdc++"
+          echo "Final CGO_LDFLAGS: $CGO_LDFLAGS"
           go build -o bin/MathReX-windows-amd64.exe ./
 
           echo "✓ Windows build successful with fixed tokenizers and hotkey implementations"
