@@ -38,7 +38,7 @@ jobs:
             goos: windows
             goarch: amd64
             asset_name_suffix: .exe
-            rust_target: x86_64-pc-windows-gnu
+            rust_target: x86_64-pc-windows-msvc
           # Windows ARM64 is more complex to set up for Rust cross-compilation, skipping for now.
           # - os: windows-latest
           #   goos: windows
@@ -99,11 +99,11 @@ jobs:
 
           echo "Building libtokenizers with Cargo for target ${{ matrix.rust_target }}..."
 
-          # For Windows, set specific environment to avoid Unix dependencies
+          # For Windows, set specific environment for MSVC
           if [[ "${{ matrix.goos }}" == "windows" ]]; then
-            echo "Setting Windows-specific Rust build environment..."
+            echo "Setting Windows-specific Rust build environment for MSVC..."
             export RUSTFLAGS="-C target-feature=+crt-static"
-            export CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER=x86_64-w64-mingw32-gcc
+            # No need to set linker for MSVC - it uses the default Visual Studio tools
           fi
 
           cargo build --release --target ${{ matrix.rust_target }}
@@ -223,10 +223,10 @@ jobs:
           mkdir -p bin
 
           # Build with the new implementations
-          echo "Building with CGO enabled and Windows-compatible tokenizers..."
-          # Add C++ standard library for Windows (required for tokenizers C++ code)
-          export CGO_LDFLAGS="$CGO_LDFLAGS -lstdc++"
-          echo "Final CGO_LDFLAGS: $CGO_LDFLAGS"
+          echo "Building with CGO enabled and Windows-compatible tokenizers (MSVC)..."
+          # For MSVC, we don't need to manually link C++ standard library
+          # MSVC automatically links the required C++ runtime libraries
+          echo "Using CGO_LDFLAGS: $CGO_LDFLAGS"
           go build -o bin/MathReX-windows-amd64.exe ./
 
           echo "✓ Windows build successful with fixed tokenizers and hotkey implementations"
