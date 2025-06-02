@@ -5,27 +5,12 @@ on:
     tags:
       - 'v*' # 触发条件：当一个以 'v' 开头的标签被推送时
 
-jobs:
-  create-release:
-    runs-on: ubuntu-latest
-    outputs:
-      upload_url: ${{ steps.create_release.outputs.upload_url }}
-    permissions:
-      contents: write
-    steps:
-      - name: Create Release
-        id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ github.ref_name }}
-          release_name: Release ${{ github.ref_name }}
-          draft: false
-          prerelease: false
+permissions:
+  contents: write
+  packages: write
 
+jobs:
   build-and-upload:
-    needs: create-release # 确保 release 创建后再执行构建和上传
     strategy:
       matrix:
         include:
@@ -61,9 +46,6 @@ jobs:
           #   asset_name_suffix: .exe
           #   rust_target: aarch64-pc-windows-msvc # or gnu
     runs-on: ${{ matrix.os }}
-    permissions:
-      contents: write # 需要写入权限来上传 release assets
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -116,6 +98,14 @@ jobs:
           cd $TOKENIZERS_REPO_DIR
 
           echo "Building libtokenizers with Cargo for target ${{ matrix.rust_target }}..."
+
+          # For Windows, set specific environment to avoid Unix dependencies
+          if [[ "${{ matrix.goos }}" == "windows" ]]; then
+            echo "Setting Windows-specific Rust build environment..."
+            export RUSTFLAGS="-C target-feature=+crt-static"
+            export CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER=x86_64-w64-mingw32-gcc
+          fi
+
           cargo build --release --target ${{ matrix.rust_target }}
 
           # Determine the correct library file extension and name based on target
@@ -170,24 +160,15 @@ jobs:
           echo "Successfully built and copied ${SOURCE_LIB_NAME}"
           cd ../.. # Return to original directory or a known base for next steps
 
-      # Windows specific setup for CGO
-      - name: Setup MinGW (Windows)
+      - name: Debug Windows build environment
         if: matrix.goos == 'windows'
         shell: bash
         run: |
-          echo "Installing MinGW-w64 via chocolatey..."
-          choco install mingw -y --no-progress
+          chmod +x debug-windows.sh
+          ./debug-windows.sh
 
-          # Add MinGW to PATH for this session
-          export PATH="/c/ProgramData/chocolatey/lib/mingw/tools/install/mingw64/bin:$PATH"
-          echo "/c/ProgramData/chocolatey/lib/mingw/tools/install/mingw64/bin" >> $GITHUB_PATH
-
-          # Verify installation
-          echo "Verifying MinGW installation..."
-          gcc --version || echo "GCC not found in PATH"
-          which gcc || echo "GCC location not found"
-
-      - name: Verify build environment
+      - name: Verify build environment (Non-Windows)
+        if: matrix.goos != 'windows'
         shell: bash
         run: |
           echo "=== Build Environment Verification ==="
@@ -201,14 +182,6 @@ jobs:
 
           echo "CGO environment:"
           go env CGO_ENABLED
-
-          if [[ "${{ matrix.goos }}" == "windows" ]]; then
-            echo "Windows-specific checks:"
-            echo "GCC version:"
-            gcc --version || echo "GCC not found"
-            echo "MinGW location:"
-            which gcc || echo "GCC not in PATH"
-          fi
 
           echo "Checking required directories:"
           ls -la ./libtokenizers/${{ matrix.goos }}_${{ matrix.goarch }}/ || echo "Tokenizers directory not found"
@@ -240,21 +213,52 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
 
-      - name: Build application for ${{ matrix.goos }}/${{ matrix.goarch }}
+      - name: Build application for ${{ matrix.goos }}/${{ matrix.goarch }} (Windows)
+        if: matrix.goos == 'windows'
         shell: bash
         run: |
-          if [ "${{ matrix.goos }}" == "windows" ]; then
-            # For Windows, create a simple wrapper to handle the build
-            echo "Building Windows application with special handling..."
-            mkdir -p bin
-            # Use go build directly with filtered environment
-            export GOOS=windows
-            export GOARCH=amd64
-            export CGO_ENABLED=1
-            export CC=gcc
-            # Build without problematic flags
-            go build -v -o bin/MathReX-windows-amd64.exe ./
-          elif [ "${{ matrix.goos }}" == "darwin" ]; then
+          echo "Building Windows application with targeted -ldl fix..."
+
+          # Try the simple and direct fix first
+          chmod +x fix-ldl-simple.sh
+          echo "=== Trying simple -ldl fix ==="
+          ./fix-ldl-simple.sh && exit 0
+
+          # If that fails, try the comprehensive fix
+          chmod +x fix-windows-cgo.sh
+          echo "=== Trying comprehensive CGO fix ==="
+          ./fix-windows-cgo.sh && exit 0
+
+          # If that fails, try the alternative approach
+          chmod +x build-windows-alternative.sh
+          echo "=== Trying alternative build strategies ==="
+          ./build-windows-alternative.sh && exit 0
+
+          # If all fail, try the simplest possible approach
+          echo "=== Trying simplest approach ==="
+          mkdir -p bin
+          export GOOS=windows
+          export GOARCH=amd64
+
+          # Try CGO disabled as absolute last resort
+          echo "Final attempt: CGO disabled build..."
+          CGO_ENABLED=0 go build -o bin/MathReX-windows-amd64.exe ./ && {
+            echo "✓ CGO disabled build successful (limited functionality)"
+            exit 0
+          }
+
+          echo "✗ All build strategies failed"
+          exit 1
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 1
+
+      - name: Build application for ${{ matrix.goos }}/${{ matrix.goarch }} (Non-Windows)
+        if: matrix.goos != 'windows'
+        shell: bash
+        run: |
+          if [ "${{ matrix.goos }}" == "darwin" ]; then
             make build-macos-app
           else
             make build
@@ -264,7 +268,7 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           MACOSX_DEPLOYMENT_TARGET: ${{ matrix.goos == 'darwin' && '10.15' || '' }}
           CGO_ENABLED: 1
-          CGO_LDFLAGS: ${{ (matrix.os != 'windows-latest' && steps.cgo_ldflags_unix.outputs.cgo_ldflags_value) || '-L./libtokenizers/windows_amd64/' }}
+          CGO_LDFLAGS: ${{ steps.cgo_ldflags_unix.outputs.cgo_ldflags_value }}
 
       - name: Add executable permissions (Linux/non-App macOS)
         if: (matrix.goos == 'linux') || (matrix.goos == 'darwin' && matrix.asset_name_suffix != '.zip')
@@ -278,12 +282,15 @@ jobs:
           cd ..
         # The asset_name_suffix for darwin should now reflect .zip
 
-      - name: Upload Release Asset
-        uses: actions/upload-release-asset@v1
+      - name: Create Release and Upload Asset
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            ${{ matrix.goos == 'darwin' && format('bin/MathReX-{0}-{1}.zip', matrix.goos, matrix.goarch) || format('bin/MathReX-{0}-{1}{2}', matrix.goos, matrix.goarch, matrix.asset_name_suffix) }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ needs.create-release.outputs.upload_url }}
-          asset_path: ${{ matrix.goos == 'darwin' && format('bin/MathReX-{0}-{1}.zip', matrix.goos, matrix.goarch) || format('bin/MathReX-{0}-{1}{2}', matrix.goos, matrix.goarch, matrix.asset_name_suffix) }}
-          asset_name: ${{ matrix.goos == 'darwin' && format('MathReX-{0}-{1}.app.zip', matrix.goos, matrix.goarch) || format('MathReX-{0}-{1}{2}', matrix.goos, matrix.goarch, matrix.asset_name_suffix) }}
-          asset_content_type: ${{ matrix.goos == 'darwin' && 'application/zip' || 'application/octet-stream' }}

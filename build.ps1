@@ -40,30 +40,59 @@ try {
     exit 1
 }
 
-# Check for C compiler
+# Check for C compiler and create wrapper if needed
 Write-Host "Checking C compiler..."
 $compilerFound = $false
+$useWrapper = $false
+
 try {
-    # Try MSVC first
-    $clVersion = cl.exe 2>&1 | Select-Object -First 1
-    Write-Host "MSVC compiler found: $clVersion"
-    $env:CC = "cl.exe"
+    # Try GCC first (preferred for consistency with GitHub Actions)
+    $gccVersion = gcc --version | Select-Object -First 1
+    Write-Host "GCC compiler found: $gccVersion"
     $compilerFound = $true
+    $useWrapper = $true
 } catch {
     try {
-        # Fallback to GCC
-        $gccVersion = gcc --version | Select-Object -First 1
-        Write-Host "GCC compiler found: $gccVersion"
-        $env:CC = "gcc"
+        # Fallback to MSVC
+        $clVersion = cl.exe 2>&1 | Select-Object -First 1
+        Write-Host "MSVC compiler found: $clVersion"
+        $env:CC = "cl.exe"
         $compilerFound = $true
     } catch {
-        Write-Host "No suitable C compiler found (tried MSVC cl.exe and GCC)"
+        Write-Host "No suitable C compiler found (tried GCC and MSVC cl.exe)"
     }
 }
 
 if (-not $compilerFound) {
-    Write-Error "No C compiler available. Please install Visual Studio Build Tools or MinGW."
+    Write-Error "No C compiler available. Please install MinGW or Visual Studio Build Tools."
     exit 1
+}
+
+# Create GCC wrapper to filter -ldl if using GCC
+if ($useWrapper) {
+    Write-Host "Creating GCC wrapper to filter -ldl flags..."
+    $wrapperContent = @'
+#!/bin/bash
+args=()
+for arg in "$@"; do
+  if [[ "$arg" != "-ldl" ]]; then
+    args+=("$arg")
+  fi
+done
+exec gcc "${args[@]}"
+'@
+    $wrapperContent | Out-File -FilePath "gcc_wrapper.sh" -Encoding UTF8
+
+    # Make it executable (if using Git Bash or similar)
+    try {
+        bash -c "chmod +x gcc_wrapper.sh"
+        $env:CC = "bash gcc_wrapper.sh"
+        Write-Host "GCC wrapper created and configured"
+    } catch {
+        # Fallback to direct GCC if bash is not available
+        $env:CC = "gcc"
+        Write-Host "Using GCC directly (bash not available for wrapper)"
+    }
 }
 
 # Go build command
