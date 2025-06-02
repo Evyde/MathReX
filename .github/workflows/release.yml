@@ -53,7 +53,7 @@ jobs:
             goos: windows
             goarch: amd64
             asset_name_suffix: .exe
-            rust_target: x86_64-pc-windows-gnu
+            rust_target: x86_64-pc-windows-msvc
           # Windows ARM64 is more complex to set up for Rust cross-compilation, skipping for now.
           # - os: windows-latest
           #   goos: windows
@@ -108,43 +108,102 @@ jobs:
         run: |
           set -e # Exit immediately if a command exits with a non-zero status.
           echo "Building tokenizer for GOOS=${{ matrix.goos }}, GOARCH=${{ matrix.goarch }}, RUST_TARGET=${{ matrix.rust_target }}"
-          
+
           TOKENIZERS_REPO_DIR=../tokenizers_src_temp # Temporary directory for cloning
-          
+
           echo "Cloning daulet/tokenizers..."
           git clone --depth 1 https://github.com/daulet/tokenizers.git $TOKENIZERS_REPO_DIR
           cd $TOKENIZERS_REPO_DIR
-          
-          echo "Building libtokenizers.a with Cargo for target ${{ matrix.rust_target }}..."
+
+          echo "Building libtokenizers with Cargo for target ${{ matrix.rust_target }}..."
           cargo build --release --target ${{ matrix.rust_target }}
-          
-          SOURCE_LIB_PATH="target/${{ matrix.rust_target }}/release/libtokenizers.a"
+
+          # Determine the correct library file extension and name based on target
+          if [[ "${{ matrix.goos }}" == "windows" ]]; then
+            LIB_EXTENSION="lib"
+            LIB_PREFIX=""
+            SOURCE_LIB_NAME="tokenizers.lib"
+          else
+            LIB_EXTENSION="a"
+            LIB_PREFIX="lib"
+            SOURCE_LIB_NAME="libtokenizers.a"
+          fi
+
+          SOURCE_LIB_PATH="target/${{ matrix.rust_target }}/release/${SOURCE_LIB_NAME}"
           DEST_DIR="${{ github.workspace }}/libtokenizers/${{ matrix.goos }}_${{ matrix.goarch }}"
-          DEST_LIB_PATH="$DEST_DIR/libtokenizers.a"
-          
+          DEST_LIB_PATH="$DEST_DIR/${SOURCE_LIB_NAME}"
+
           echo "Source library path: $SOURCE_LIB_PATH"
           echo "Destination directory: $DEST_DIR"
-          
+
+          # Check for alternative library names if the primary one doesn't exist
           if [ ! -f "$SOURCE_LIB_PATH" ]; then
-            echo "Build failed: $SOURCE_LIB_PATH not found!"
+            echo "Primary library not found, checking alternatives..."
+            if [[ "${{ matrix.goos }}" == "windows" ]]; then
+              # Try .lib and .a extensions for Windows
+              for alt_name in "libtokenizers.lib" "tokenizers.lib" "libtokenizers.a"; do
+                alt_path="target/${{ matrix.rust_target }}/release/${alt_name}"
+                if [ -f "$alt_path" ]; then
+                  SOURCE_LIB_PATH="$alt_path"
+                  SOURCE_LIB_NAME="$alt_name"
+                  DEST_LIB_PATH="$DEST_DIR/${alt_name}"
+                  echo "Found alternative: $SOURCE_LIB_PATH"
+                  break
+                fi
+              done
+            fi
+          fi
+
+          if [ ! -f "$SOURCE_LIB_PATH" ]; then
+            echo "Build failed: No suitable library found!"
+            echo "Contents of target/${{ matrix.rust_target }}/release/:"
+            ls -la "target/${{ matrix.rust_target }}/release/" || echo "Directory not found"
             exit 1
           fi
-          
+
           echo "Creating destination directory: $DEST_DIR"
           mkdir -p "$DEST_DIR"
-          
+
           echo "Copying $SOURCE_LIB_PATH to $DEST_LIB_PATH"
           cp "$SOURCE_LIB_PATH" "$DEST_LIB_PATH"
-          
-          echo "Successfully built and copied libtokenizers.a"
+
+          echo "Successfully built and copied ${SOURCE_LIB_NAME}"
           cd ../.. # Return to original directory or a known base for next steps
 
-      # Windows specific setup for CGO - May be needed if Rust on Windows can't find a linker
-      # - name: Setup MinGW (Windows)
-      #   if: matrix.goos == 'windows'
-      #   uses: egor-tensin/setup-mingw@v2
-      #   with:
-      #     arch: x64 # or x86
+      # Windows specific setup for CGO
+      - name: Setup MSVC (Windows)
+        if: matrix.goos == 'windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Verify build environment
+        shell: bash
+        run: |
+          echo "=== Build Environment Verification ==="
+          echo "OS: ${{ matrix.os }}"
+          echo "GOOS: ${{ matrix.goos }}"
+          echo "GOARCH: ${{ matrix.goarch }}"
+          echo "Rust target: ${{ matrix.rust_target }}"
+
+          echo "Go version:"
+          go version
+
+          echo "CGO environment:"
+          go env CGO_ENABLED
+
+          if [[ "${{ matrix.goos }}" == "windows" ]]; then
+            echo "Windows-specific checks:"
+            echo "MSVC compiler:"
+            cl.exe 2>&1 | head -1 || echo "MSVC cl.exe not found"
+            echo "Environment variables:"
+            echo "VCINSTALLDIR: $VCINSTALLDIR"
+            echo "WindowsSdkDir: $WindowsSdkDir"
+          fi
+
+          echo "Checking required directories:"
+          ls -la ./libtokenizers/${{ matrix.goos }}_${{ matrix.goarch }}/ || echo "Tokenizers directory not found"
+          ls -la ./onnxruntime/ || echo "ONNX Runtime directory not found"
 
       - name: Get CGO_LDFLAGS (Unix-like)
         if: matrix.os != 'windows-latest'
@@ -160,21 +219,20 @@ jobs:
       - name: Get CGO_LDFLAGS (Windows)
         if: matrix.os == 'windows-latest'
         id: cgo_ldflags_windows
-        shell: pwsh
+        shell: bash
         run: |
-          $LDFLAGS_VALUE = (make -s print-cgo-ldflags | Out-String).Trim()
-          Write-Host "Original CGO_LDFLAGS from make: $LDFLAGS_VALUE"
-          # Attempt to remove -ldl if it's present. This is a speculative fix.
-          $LDFLAGS_VALUE_CLEANED = $LDFLAGS_VALUE -replace '-ldl\b', '' # \b for word boundary
-          $LDFLAGS_VALUE_CLEANED = $LDFLAGS_VALUE_CLEANED -replace '\s\s+', ' ' # Replace multiple spaces with single
-          $LDFLAGS_VALUE_CLEANED = $LDFLAGS_VALUE_CLEANED.Trim()
-          Write-Host "Cleaned CGO_LDFLAGS (attempted -ldl removal): $LDFLAGS_VALUE_CLEANED"
-          "cgo_ldflags_value=$LDFLAGS_VALUE_CLEANED" | Add-Content -Path $env:GITHUB_OUTPUT
+          LDFLAGS_VALUE=$(make -s print-cgo-ldflags)
+          echo "Original CGO_LDFLAGS from make: $LDFLAGS_VALUE"
+          # Remove problematic flags for Windows
+          LDFLAGS_VALUE_CLEANED=$(echo "$LDFLAGS_VALUE" | sed 's/-ldl//g' | sed 's/--exclude-libs,dl//g' | sed 's/  */ /g' | sed 's/^ *//' | sed 's/ *$//')
+          echo "Cleaned CGO_LDFLAGS: $LDFLAGS_VALUE_CLEANED"
+          echo "cgo_ldflags_value=$LDFLAGS_VALUE_CLEANED" >> $GITHUB_OUTPUT
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
 
       - name: Build application for ${{ matrix.goos }}/${{ matrix.goarch }}
+        shell: bash
         run: |
           if [ "${{ matrix.goos }}" == "darwin" ]; then
             make build-macos-app
@@ -187,9 +245,7 @@ jobs:
           MACOSX_DEPLOYMENT_TARGET: ${{ matrix.goos == 'darwin' && '10.15' || '' }}
           CGO_ENABLED: 1
           CGO_LDFLAGS: ${{ (matrix.os == 'windows-latest' && steps.cgo_ldflags_windows.outputs.cgo_ldflags_value) || steps.cgo_ldflags_unix.outputs.cgo_ldflags_value }}
-          # For Windows, ensure CC is set if CGO_ENABLED=1 and not automatically found.
-          # setup-mingw should put gcc in PATH. If CGO still fails, uncommenting and setting CC might be needed.
-          # CC: gcc
+          CC: ${{ matrix.goos == 'windows' && 'cl.exe' || '' }}
 
       - name: Add executable permissions (Linux/non-App macOS)
         if: (matrix.goos == 'linux') || (matrix.goos == 'darwin' && matrix.asset_name_suffix != '.zip')

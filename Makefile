@@ -5,7 +5,7 @@ COMMON_LDFLAGS = -L./libtokenizers/$(GOOS)_$(GOARCH)/
 
 # Platform-specific additions to LDFLAGS
 LDFLAGS_ADD_darwin = -mmacosx-version-min=10.15 # Set a common minimum macOS version
-LDFLAGS_ADD_windows = -Wl,--exclude-libs,dl # Attempt to exclude libdl for Windows builds, again
+LDFLAGS_ADD_windows = # No specific additions for Windows by default
 LDFLAGS_ADD_linux =   # No specific additions for Linux by default.
 
 # Determine final CGO_LDFLAGS based on GOOS
