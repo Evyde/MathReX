@@ -40,3 +40,5 @@ require (
 	golang.org/x/image v0.25.0 // indirect
 	golang.org/x/text v0.23.0 // indirect
 )
+
+replace github.com/daulet/tokenizers => github.com/Evyde/tokenizers v1.0.2
