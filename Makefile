@@ -33,7 +33,11 @@ build:
 	@echo "GOOS=$(GOOS), GOARCH=$(GOARCH)"
 	@echo "CGO_ENABLED=$(CGO_ENABLED)"
 	@echo "Using CGO_LDFLAGS from environment: $(CGO_LDFLAGS)"
+ifeq ($(GOOS),windows)
+	go build $(GO_BUILD_FLAGS) -o bin/MathReX-$(GOOS)-$(GOARCH).exe ./
+else
 	go build $(GO_BUILD_FLAGS) -o bin/MathReX-$(GOOS)-$(GOARCH) ./
+endif
 
 # Build for all specified platforms
 build-all:

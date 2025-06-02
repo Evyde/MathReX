@@ -15,6 +15,7 @@ require (
 	github.com/robotn/gohook v0.42.1
 	github.com/sqweek/dialog v0.0.0-20240226140203-065105509627
 	github.com/yalue/onnxruntime_go v1.19.0
+	golang.org/x/sys v0.33.0
 )
 
 require (
@@ -37,6 +38,5 @@ require (
 	github.com/stretchr/testify v1.9.0 // indirect
 	github.com/vcaesar/keycode v0.10.1 // indirect
 	golang.org/x/image v0.25.0 // indirect
-	golang.org/x/sys v0.33.0 // indirect
 	golang.org/x/text v0.23.0 // indirect
 )
