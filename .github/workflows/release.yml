@@ -53,7 +53,7 @@ jobs:
             goos: windows
             goarch: amd64
             asset_name_suffix: .exe
-            rust_target: x86_64-pc-windows-msvc
+            rust_target: x86_64-pc-windows-gnu
           # Windows ARM64 is more complex to set up for Rust cross-compilation, skipping for now.
           # - os: windows-latest
           #   goos: windows
@@ -171,11 +171,21 @@ jobs:
           cd ../.. # Return to original directory or a known base for next steps
 
       # Windows specific setup for CGO
-      - name: Setup MSVC (Windows)
+      - name: Setup MinGW (Windows)
         if: matrix.goos == 'windows'
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
+        shell: bash
+        run: |
+          echo "Installing MinGW-w64 via chocolatey..."
+          choco install mingw -y --no-progress
+
+          # Add MinGW to PATH for this session
+          export PATH="/c/ProgramData/chocolatey/lib/mingw/tools/install/mingw64/bin:$PATH"
+          echo "/c/ProgramData/chocolatey/lib/mingw/tools/install/mingw64/bin" >> $GITHUB_PATH
+
+          # Verify installation
+          echo "Verifying MinGW installation..."
+          gcc --version || echo "GCC not found in PATH"
+          which gcc || echo "GCC location not found"
 
       - name: Verify build environment
         shell: bash
@@ -194,11 +204,10 @@ jobs:
 
           if [[ "${{ matrix.goos }}" == "windows" ]]; then
             echo "Windows-specific checks:"
-            echo "MSVC compiler:"
-            cl.exe 2>&1 | head -1 || echo "MSVC cl.exe not found"
-            echo "Environment variables:"
-            echo "VCINSTALLDIR: $VCINSTALLDIR"
-            echo "WindowsSdkDir: $WindowsSdkDir"
+            echo "GCC version:"
+            gcc --version || echo "GCC not found"
+            echo "MinGW location:"
+            which gcc || echo "GCC not in PATH"
           fi
 
           echo "Checking required directories:"
@@ -245,7 +254,7 @@ jobs:
           MACOSX_DEPLOYMENT_TARGET: ${{ matrix.goos == 'darwin' && '10.15' || '' }}
           CGO_ENABLED: 1
           CGO_LDFLAGS: ${{ (matrix.os == 'windows-latest' && steps.cgo_ldflags_windows.outputs.cgo_ldflags_value) || steps.cgo_ldflags_unix.outputs.cgo_ldflags_value }}
-          CC: ${{ matrix.goos == 'windows' && 'cl.exe' || '' }}
+          CC: ${{ matrix.goos == 'windows' && 'gcc' || '' }}
 
       - name: Add executable permissions (Linux/non-App macOS)
         if: (matrix.goos == 'linux') || (matrix.goos == 'darwin' && matrix.asset_name_suffix != '.zip')

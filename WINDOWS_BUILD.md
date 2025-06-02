@@ -12,15 +12,15 @@ This document provides instructions for building MathReX on Windows, including t
 
 2. **Rust toolchain**
    - Download from: https://rustup.rs/
-   - Install the MSVC target: `rustup target add x86_64-pc-windows-msvc`
+   - Install the GNU target: `rustup target add x86_64-pc-windows-gnu`
 
-3. **C Compiler (Visual Studio Build Tools recommended)**
-   - **Option A: Visual Studio Build Tools (Recommended)**
-     - Download from: https://visualstudio.microsoft.com/downloads/
-     - Install "C++ build tools" workload
-   - **Option B: MinGW-w64**
+3. **C Compiler (MinGW recommended for compatibility)**
+   - **Option A: MinGW-w64 (Recommended)**
      - Download from: https://www.mingw-w64.org/downloads/
      - Or use TDM-GCC: https://jmeubank.github.io/tdm-gcc/
+   - **Option B: Visual Studio Build Tools**
+     - Download from: https://visualstudio.microsoft.com/downloads/
+     - Install "C++ build tools" workload
 
 4. **Git**
    - Download from: https://git-scm.com/download/win
@@ -31,9 +31,9 @@ This document provides instructions for building MathReX on Windows, including t
    ```cmd
    go version
    rustc --version
-   cl.exe          # for Visual Studio (preferred)
+   gcc --version   # for MinGW (recommended)
    # OR
-   gcc --version   # for MinGW
+   cl.exe          # for Visual Studio
    git --version
    ```
 
@@ -107,9 +107,9 @@ This script will verify:
 
 #### 2. "cgo: C compiler not found"
 **Solutions:**
-- Install a C compiler (Visual Studio Build Tools recommended)
-- Set `CC` environment variable: `set CC=cl` (for MSVC)
-- Or for MinGW: `set CC=gcc`
+- Install a C compiler (MinGW recommended for compatibility)
+- Set `CC` environment variable: `set CC=gcc` (for MinGW)
+- Or for MSVC: `set CC=cl`
 
 #### 3. "undefined reference to..." errors
 **Solutions:**
@@ -122,7 +122,7 @@ This script will verify:
 
 #### 5. Rust compilation fails
 **Solutions:**
-- Install MSVC target: `rustup target add x86_64-pc-windows-msvc`
+- Install GNU target: `rustup target add x86_64-pc-windows-gnu`
 - Update Rust: `rustup update`
 - Check internet connection for dependency downloads
 

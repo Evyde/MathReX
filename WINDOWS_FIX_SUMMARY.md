@@ -10,35 +10,32 @@ The GitHub Actions workflow was failing to compile the MathReX application for W
 
 ## Solution Overview
 
-### 1. Replaced MinGW with MSVC
+### 1. Fixed MinGW Setup
 **Before:**
 ```yaml
 - name: Setup MinGW (Windows)
-  uses: egor-tensin/setup-mingw@v2
+  uses: egor-tensin/setup-mingw@v2  # This was failing
 ```
 
 **After:**
 ```yaml
-- name: Setup MSVC (Windows)
-  uses: ilammy/msvc-dev-cmd@v1
-  with:
-    arch: x64
+- name: Setup MinGW (Windows)
+  shell: bash
+  run: |
+    choco install mingw -y --no-progress
+    export PATH="/c/ProgramData/chocolatey/lib/mingw/tools/install/mingw64/bin:$PATH"
+    echo "/c/ProgramData/chocolatey/lib/mingw/tools/install/mingw64/bin" >> $GITHUB_PATH
 ```
 
-**Why:** MSVC is more reliable on Windows runners and avoids the file deletion issues with MinGW setup.
+**Why:** Direct chocolatey installation avoids the file deletion issues with the setup-mingw action.
 
-### 2. Updated Rust Target
-**Before:**
+### 2. Kept Rust GNU Target
+**Configuration:**
 ```yaml
 rust_target: x86_64-pc-windows-gnu
 ```
 
-**After:**
-```yaml
-rust_target: x86_64-pc-windows-msvc
-```
-
-**Why:** MSVC target is more compatible with Windows build environment and ONNX Runtime.
+**Why:** GNU target is compatible with MinGW toolchain and avoids MSVC compiler flag conflicts.
 
 ### 3. Fixed CGO Linker Flags
 **Before:**
@@ -53,18 +50,13 @@ LDFLAGS_ADD_windows = # No specific additions for Windows by default
 
 **Why:** The `--exclude-libs,dl` flag is Linux-specific and causes errors on Windows.
 
-### 4. Updated C Compiler Configuration
-**Before:**
+### 4. Consistent C Compiler Configuration
+**Configuration:**
 ```yaml
 CC: ${{ matrix.goos == 'windows' && 'gcc' || '' }}
 ```
 
-**After:**
-```yaml
-CC: ${{ matrix.goos == 'windows' && 'cl.exe' || '' }}
-```
-
-**Why:** Using MSVC compiler (cl.exe) instead of GCC for consistency.
+**Why:** Using GCC from MinGW for consistency with the GNU toolchain.
 
 ### 5. Enhanced Tokenizers Build
 Added better handling for Windows library file formats:
@@ -135,11 +127,11 @@ If issues persist:
 
 ## Key Improvements
 
-1. **Reliability:** MSVC is more stable than MinGW on Windows runners
-2. **Compatibility:** MSVC target aligns with ONNX Runtime Windows builds
+1. **Reliability:** Direct MinGW installation avoids setup-mingw action issues
+2. **Compatibility:** GNU toolchain provides consistent behavior across platforms
 3. **Debugging:** Enhanced logging and verification steps
 4. **Documentation:** Comprehensive Windows build guide
-5. **Flexibility:** Support for both MSVC and MinGW locally
+5. **Flexibility:** Support for both MinGW and MSVC locally
 
 ## Next Steps
 
