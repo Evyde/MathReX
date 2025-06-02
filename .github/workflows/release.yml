@@ -93,8 +93,8 @@ jobs:
 
           TOKENIZERS_REPO_DIR=../tokenizers_src_temp # Temporary directory for cloning
 
-          echo "Cloning daulet/tokenizers..."
-          git clone --depth 1 https://github.com/daulet/tokenizers.git $TOKENIZERS_REPO_DIR
+          echo "Cloning Evyde/tokenizers..."
+          git clone --depth 1 https://github.com/Evyde/tokenizers.git $TOKENIZERS_REPO_DIR
           cd $TOKENIZERS_REPO_DIR
 
           echo "Building libtokenizers with Cargo for target ${{ matrix.rust_target }}..."
