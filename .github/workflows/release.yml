@@ -224,10 +224,14 @@ jobs:
 
           # Build with the new implementations
           echo "Building with CGO enabled and Windows-compatible tokenizers (MSVC)..."
-          # For MSVC, we don't need to manually link C++ standard library
-          # MSVC automatically links the required C++ runtime libraries
+          # For Windows, we need to statically link C++ standard library to avoid libstdc++-6.dll dependency
           echo "Using CGO_LDFLAGS: $CGO_LDFLAGS"
-          go build -o bin/MathReX-windows-amd64.exe ./
+
+          # Add static linking flags for C++ standard library
+          STATIC_LDFLAGS="$CGO_LDFLAGS -static-libgcc -static-libstdc++"
+          echo "Enhanced CGO_LDFLAGS with static linking: $STATIC_LDFLAGS"
+
+          CGO_LDFLAGS="$STATIC_LDFLAGS" go build -o bin/MathReX-windows-amd64.exe ./
 
           echo "✓ Windows build successful with fixed tokenizers and hotkey implementations"
         env:
@@ -240,11 +244,18 @@ jobs:
         if: matrix.goos != 'windows'
         shell: bash
         run: |
+          echo "Building for ${{ matrix.goos }}/${{ matrix.goarch }}..."
+          echo "CGO_LDFLAGS: $CGO_LDFLAGS"
+
           if [ "${{ matrix.goos }}" == "darwin" ]; then
+            echo "Building macOS .app bundle..."
             make build-macos-app
           else
+            echo "Building standard binary..."
             make build
           fi
+
+          echo "✓ Build completed successfully"
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}

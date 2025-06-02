@@ -18,12 +18,12 @@ import (
 type UnixHotkeyManager struct {
 	mutex             sync.Mutex
 	running           bool
-	hookEventChannel  chan gohook.Event
-	hookProcessDone   chan struct{}
 	registeredHotkeys map[string]func()
 	captureMode       bool
 	captureChan       chan string
 	captureStopChan   chan struct{}
+	hookEventChannel  chan gohook.Event
+	hookProcessDone   chan struct{}
 }
 
 // newPlatformHotkeyManager creates a new Unix/Linux/macOS hotkey manager
