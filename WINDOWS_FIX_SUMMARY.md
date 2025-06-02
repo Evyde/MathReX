@@ -5,8 +5,9 @@ The GitHub Actions workflow was failing to compile the MathReX application for W
 
 1. MinGW setup action was failing with missing file errors
 2. Incompatible Rust target configuration
-3. Problematic CGO linker flags for Windows
+3. Problematic CGO linker flags for Windows (-ldl not available on Windows)
 4. Missing C compiler setup
+5. Dependencies trying to link against libdl which doesn't exist on Windows
 
 ## Solution Overview
 
@@ -64,7 +65,18 @@ Added better handling for Windows library file formats:
 - Handles different naming conventions
 - Provides detailed error messages
 
-### 6. Added Build Environment Verification
+### 6. Windows-Specific Build Process
+**Implementation:**
+```yaml
+if [ "${{ matrix.goos }}" == "windows" ]; then
+  # Direct go build without problematic Makefile flags
+  go build -v -o bin/MathReX-windows-amd64.exe ./
+fi
+```
+
+**Why:** Bypasses Makefile and dependency-injected `-ldl` flags that cause Windows linking errors.
+
+### 7. Added Build Environment Verification
 New step to verify the build environment before compilation:
 - Checks Go installation
 - Verifies CGO support

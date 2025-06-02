@@ -243,7 +243,18 @@ jobs:
       - name: Build application for ${{ matrix.goos }}/${{ matrix.goarch }}
         shell: bash
         run: |
-          if [ "${{ matrix.goos }}" == "darwin" ]; then
+          if [ "${{ matrix.goos }}" == "windows" ]; then
+            # For Windows, create a simple wrapper to handle the build
+            echo "Building Windows application with special handling..."
+            mkdir -p bin
+            # Use go build directly with filtered environment
+            export GOOS=windows
+            export GOARCH=amd64
+            export CGO_ENABLED=1
+            export CC=gcc
+            # Build without problematic flags
+            go build -v -o bin/MathReX-windows-amd64.exe ./
+          elif [ "${{ matrix.goos }}" == "darwin" ]; then
             make build-macos-app
           else
             make build
@@ -253,8 +264,7 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           MACOSX_DEPLOYMENT_TARGET: ${{ matrix.goos == 'darwin' && '10.15' || '' }}
           CGO_ENABLED: 1
-          CGO_LDFLAGS: ${{ (matrix.os == 'windows-latest' && steps.cgo_ldflags_windows.outputs.cgo_ldflags_value) || steps.cgo_ldflags_unix.outputs.cgo_ldflags_value }}
-          CC: ${{ matrix.goos == 'windows' && 'gcc' || '' }}
+          CGO_LDFLAGS: ${{ (matrix.os != 'windows-latest' && steps.cgo_ldflags_unix.outputs.cgo_ldflags_value) || '-L./libtokenizers/windows_amd64/' }}
 
       - name: Add executable permissions (Linux/non-App macOS)
         if: (matrix.goos == 'linux') || (matrix.goos == 'darwin' && matrix.asset_name_suffix != '.zip')
