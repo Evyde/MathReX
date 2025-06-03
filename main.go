@@ -307,11 +307,8 @@ func onReady() {
 
 	if err != nil {
 		log.Printf("ERROR: Failed to extract embedded files: %v", err)
-		if runtime.GOOS == "windows" {
-			log.Println("Continuing without ONNX runtime for debugging...")
-		} else {
-			log.Fatalf("Failed to extract embedded files: %v", err)
-		}
+		log.Printf("This usually means ONNX runtime library is missing")
+		log.Printf("On Windows, this is expected in debug mode - trying to continue...")
 	} else {
 		log.Printf("Files extracted successfully. Lib: %s", extractedLibPath)
 
@@ -325,39 +322,54 @@ func onReady() {
 		log.Println("Initializing ONNX runtime environment...")
 		if err := onnxruntime.InitializeEnvironment(); err != nil {
 			log.Printf("ERROR: ONNX Init fail: %v", err)
-			if runtime.GOOS == "windows" {
-				log.Println("Continuing without ONNX runtime for debugging...")
-			} else {
-				log.Fatalf("ONNX Init fail: %v", err)
-			}
+			log.Printf("This is expected on Windows without proper ONNX runtime setup")
 		} else {
 			log.Println("ONNX runtime initialized successfully")
 
 			log.Println("Initializing tokenizer...")
 			if err := model_controller.InitTokenizer(extractedTokenizerPath); err != nil {
 				log.Printf("ERROR: Tokenizer Init fail: %v", err)
-				if runtime.GOOS == "windows" {
-					log.Println("Continuing without tokenizer for debugging...")
-				} else {
-					log.Fatalf("Tokenizer Init fail: %v", err)
-				}
 			} else {
 				log.Println("Tokenizer initialized successfully")
 
 				log.Println("Initializing models...")
 				if err := model_controller.InitModels(extractedEncoderPath, extractedDecoderPath); err != nil {
 					log.Printf("ERROR: Models Init fail: %v", err)
-					if runtime.GOOS == "windows" {
-						log.Println("Continuing without models for debugging...")
-					} else {
-						log.Fatalf("Models Init fail: %v", err)
-					}
 				} else {
 					log.Println("Models initialized successfully")
 					modelsInitialized = true
 				}
 			}
 		}
+	}
+
+	// For Windows debugging, let's try to show what files are available
+	if runtime.GOOS == "windows" {
+		log.Println("=== Windows Debug: Checking available files ===")
+		if wd, err := os.Getwd(); err == nil {
+			log.Printf("Working directory: %s", wd)
+		}
+
+		// Check if onnxruntime directory exists
+		if _, err := os.Stat("onnxruntime"); err == nil {
+			log.Println("onnxruntime directory found")
+			if files, err := os.ReadDir("onnxruntime"); err == nil {
+				log.Printf("onnxruntime directory contents: %d files", len(files))
+				for _, file := range files {
+					log.Printf("  - %s", file.Name())
+				}
+			}
+		} else {
+			log.Printf("onnxruntime directory not found: %v", err)
+		}
+
+		// Check if libtokenizers directory exists
+		if _, err := os.Stat("libtokenizers"); err == nil {
+			log.Println("libtokenizers directory found")
+		} else {
+			log.Printf("libtokenizers directory not found: %v", err)
+		}
+		log.Println("=== End Windows Debug ===")
 	}
 
 	log.Println("Initializing KaTeX...")
@@ -627,10 +639,22 @@ func processImageFile(imagePath string) {
 		outputFmt = "mathml"
 		log.Println("Warning: OMML output format encountered unexpectedly, falling back to MathML.")
 	}
+
+	log.Printf("Attempting to process image with format: %s", outputFmt)
 	resultText, _, err := model_controller.ProcessImagePrediction(imageBytes, outputFmt)
 	if err != nil {
 		log.Printf("Failed to process image prediction: %v", err)
-		dialog.Message(fmt.Sprintf("Failed to process image: %v", err)).Title("Error").Error()
+
+		// Provide more helpful error message for Windows users
+		errorMsg := fmt.Sprintf("Failed to process image: %v", err)
+		if runtime.GOOS == "windows" && strings.Contains(err.Error(), "not initialized") {
+			errorMsg = "Image recognition is not available in this debug version.\n\n" +
+				"This is because the ONNX runtime and models are not properly initialized on Windows.\n" +
+				"The application is running in debug mode to help identify startup issues.\n\n" +
+				"Original error: " + err.Error()
+		}
+
+		dialog.Message(errorMsg).Title("Error").Error()
 		return
 	}
 

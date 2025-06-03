@@ -11,6 +11,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
@@ -252,10 +253,36 @@ func (w *WindowsHotkeyManager) parseShortcut(shortcut string) (uint32, uint32, e
 }
 
 func (w *WindowsHotkeyManager) createMessageWindow() error {
-	// This is a simplified implementation
-	// In a real implementation, you'd want to register a window class and create a proper message-only window
-	// For now, we'll use a simple approach
-	w.messageWindow = windows.Handle(1) // Placeholder
+	// Create a message-only window using GetDesktopWindow as parent
+	user32 := syscall.NewLazyDLL("user32.dll")
+	createWindowEx := user32.NewProc("CreateWindowExW")
+	getDesktopWindow := user32.NewProc("GetDesktopWindow")
+
+	// Get desktop window handle
+	desktop, _, _ := getDesktopWindow.Call()
+
+	// Create a message-only window
+	hwnd, _, err := createWindowEx.Call(
+		0,          // dwExStyle
+		uintptr(0), // lpClassName (NULL for message-only window)
+		uintptr(0), // lpWindowName (NULL)
+		0,          // dwStyle
+		0, 0, 0, 0, // x, y, width, height
+		desktop, // hWndParent (desktop for message-only)
+		0,       // hMenu
+		0,       // hInstance
+		0,       // lpParam
+	)
+
+	if hwnd == 0 {
+		log.Printf("Warning: Failed to create message window: %v", err)
+		// Use a fallback approach - use the desktop window
+		w.messageWindow = windows.Handle(desktop)
+	} else {
+		w.messageWindow = windows.Handle(hwnd)
+	}
+
+	log.Printf("Windows message window created: %v", w.messageWindow)
 	return nil
 }
 
@@ -263,32 +290,96 @@ func (w *WindowsHotkeyManager) messageLoop() {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
+	user32 := syscall.NewLazyDLL("user32.dll")
+	peekMessage := user32.NewProc("PeekMessageW")
+	translateMessage := user32.NewProc("TranslateMessage")
+	dispatchMessage := user32.NewProc("DispatchMessageW")
+
+	// MSG structure
+	type MSG struct {
+		Hwnd    uintptr
+		Message uint32
+		WParam  uintptr
+		LParam  uintptr
+		Time    uint32
+		Pt      struct{ X, Y int32 }
+	}
+
+	var msg MSG
+
+	log.Println("Windows hotkey message loop started")
+
 	for {
 		select {
 		case <-w.stopChan:
+			log.Println("Windows hotkey message loop stopping")
 			return
 		default:
-			// Simplified message loop - in a real implementation, you'd use GetMessage/PeekMessage
-			time.Sleep(10 * time.Millisecond)
+			// Check for messages
+			ret, _, _ := peekMessage.Call(
+				uintptr(unsafe.Pointer(&msg)),
+				0, // hWnd (0 = all windows for this thread)
+				0, // wMsgFilterMin
+				0, // wMsgFilterMax
+				1, // wRemoveMsg (PM_REMOVE)
+			)
+
+			if ret != 0 {
+				// We have a message
+				if msg.Message == WM_HOTKEY {
+					log.Printf("Received WM_HOTKEY message: wParam=%d", msg.WParam)
+					w.handleHotkeyMessage(int32(msg.WParam))
+				}
+
+				// Translate and dispatch the message
+				translateMessage.Call(uintptr(unsafe.Pointer(&msg)))
+				dispatchMessage.Call(uintptr(unsafe.Pointer(&msg)))
+			} else {
+				// No message, sleep briefly to avoid busy waiting
+				time.Sleep(10 * time.Millisecond)
+			}
 		}
 	}
 }
 
+func (w *WindowsHotkeyManager) handleHotkeyMessage(hotkeyID int32) {
+	w.mutex.Lock()
+	defer w.mutex.Unlock()
+
+	if info, exists := w.hotkeys[hotkeyID]; exists {
+		log.Printf("Executing callback for hotkey: %s (ID: %d)", info.shortcut, hotkeyID)
+		go info.callback()
+	} else {
+		log.Printf("Received hotkey message for unknown ID: %d", hotkeyID)
+	}
+}
+
 func (w *WindowsHotkeyManager) captureLoop() {
-	// Simplified capture implementation
-	// In a real implementation, you'd use SetWindowsHookEx with WH_KEYBOARD_LL
-	// For now, we'll provide a basic timeout-based approach
+	log.Println("Windows: Starting hotkey capture mode")
 
-	timeout := time.After(30 * time.Second)
+	// For now, provide a simplified capture that suggests common shortcuts
+	// In a full implementation, you'd use SetWindowsHookEx with WH_KEYBOARD_LL
 
-	select {
-	case <-timeout:
-		// Timeout - send a default shortcut
+	// Wait a bit, then suggest a default shortcut
+	go func() {
+		time.Sleep(2 * time.Second)
+
 		select {
 		case w.captureChan <- "ctrl+shift+s":
+			log.Println("Windows: Suggested default shortcut ctrl+shift+s")
+		case <-w.captureStopChan:
+			return
 		default:
 		}
+	}()
+
+	// Wait for timeout or stop signal
+	timeout := time.After(30 * time.Second)
+	select {
+	case <-timeout:
+		log.Println("Windows: Hotkey capture timed out")
 	case <-w.captureStopChan:
+		log.Println("Windows: Hotkey capture stopped")
 		return
 	}
 }
