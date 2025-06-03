@@ -85,9 +85,17 @@ jobs:
           # Add MinGW-w64 to PATH
           echo "C:/tools/msys64/mingw64/bin" >> $GITHUB_PATH
 
+          # Create symlinks for the expected tool names
+          cd "C:/tools/msys64/mingw64/bin"
+          ln -sf x86_64-w64-mingw32-gcc.exe gcc.exe || true
+          ln -sf x86_64-w64-mingw32-g++.exe g++.exe || true
+          ln -sf x86_64-w64-mingw32-ar.exe ar.exe || true
+
           # Verify installation
           echo "Verifying MinGW-w64 installation..."
-          ls -la "C:/tools/msys64/mingw64/bin/" | grep -E "(gcc|g\+\+|ar)\.exe" || echo "Some tools not found"
+          ls -la "C:/tools/msys64/mingw64/bin/" | grep -E "(gcc|g\+\+|ar)\.exe"
+          echo "Testing gcc..."
+          C:/tools/msys64/mingw64/bin/x86_64-w64-mingw32-gcc.exe --version || echo "gcc test failed"
 
 
 
