@@ -75,27 +75,34 @@ jobs:
         shell: bash
         run: |
           echo "Installing MinGW-w64 for Windows GNU target..."
-          # Install MSYS2 which provides a complete MinGW-w64 toolchain
-          choco install msys2 -y
+          # Use chocolatey to install a simpler MinGW package
+          choco install mingw -y
 
-          # Update MSYS2 and install MinGW-w64 toolchain
-          C:/tools/msys64/usr/bin/bash.exe -lc "pacman -Syu --noconfirm"
-          C:/tools/msys64/usr/bin/bash.exe -lc "pacman -S --noconfirm mingw-w64-x86_64-toolchain"
-
-          # Add MinGW-w64 to PATH
-          echo "C:/tools/msys64/mingw64/bin" >> $GITHUB_PATH
-
-          # Create symlinks for the expected tool names
-          cd "C:/tools/msys64/mingw64/bin"
-          ln -sf x86_64-w64-mingw32-gcc.exe gcc.exe || true
-          ln -sf x86_64-w64-mingw32-g++.exe g++.exe || true
-          ln -sf x86_64-w64-mingw32-ar.exe ar.exe || true
+          # Add MinGW to PATH
+          echo "C:/tools/mingw64/bin" >> $GITHUB_PATH
 
           # Verify installation
-          echo "Verifying MinGW-w64 installation..."
-          ls -la "C:/tools/msys64/mingw64/bin/" | grep -E "(gcc|g\+\+|ar)\.exe"
+          echo "Verifying MinGW installation..."
+          ls -la "C:/tools/mingw64/bin/" | grep -E "(gcc|g\+\+|ar)\.exe" || echo "Some tools not found"
+
+          # Test gcc directly
           echo "Testing gcc..."
-          C:/tools/msys64/mingw64/bin/x86_64-w64-mingw32-gcc.exe --version || echo "gcc test failed"
+          "C:/tools/mingw64/bin/gcc.exe" --version || echo "gcc test failed"
+
+          # Create the expected symlinks if they don't exist
+          cd "C:/tools/mingw64/bin"
+          if [ ! -f "x86_64-w64-mingw32-gcc.exe" ]; then
+            ln -sf gcc.exe x86_64-w64-mingw32-gcc.exe || cp gcc.exe x86_64-w64-mingw32-gcc.exe
+          fi
+          if [ ! -f "x86_64-w64-mingw32-g++.exe" ]; then
+            ln -sf g++.exe x86_64-w64-mingw32-g++.exe || cp g++.exe x86_64-w64-mingw32-g++.exe
+          fi
+          if [ ! -f "x86_64-w64-mingw32-ar.exe" ]; then
+            ln -sf ar.exe x86_64-w64-mingw32-ar.exe || cp ar.exe x86_64-w64-mingw32-ar.exe
+          fi
+
+          echo "Final verification..."
+          ls -la | grep "x86_64-w64-mingw32"
 
 
 
