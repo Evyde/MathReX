@@ -78,19 +78,35 @@ jobs:
           # Use chocolatey to install a simpler MinGW package
           choco install mingw -y
 
+          # Find the actual MinGW installation path
+          echo "Finding MinGW installation path..."
+          MINGW_PATH=""
+          for path in "C:/ProgramData/mingw64/mingw64/bin" "C:/tools/mingw64/bin" "C:/mingw64/bin"; do
+            if [ -d "$path" ]; then
+              MINGW_PATH="$path"
+              echo "Found MinGW at: $MINGW_PATH"
+              break
+            fi
+          done
+
+          if [ -z "$MINGW_PATH" ]; then
+            echo "MinGW installation not found!"
+            exit 1
+          fi
+
           # Add MinGW to PATH
-          echo "C:/tools/mingw64/bin" >> $GITHUB_PATH
+          echo "$MINGW_PATH" >> $GITHUB_PATH
 
           # Verify installation
           echo "Verifying MinGW installation..."
-          ls -la "C:/tools/mingw64/bin/" | grep -E "(gcc|g\+\+|ar)\.exe" || echo "Some tools not found"
+          ls -la "$MINGW_PATH/" | grep -E "(gcc|g\+\+|ar)\.exe" || echo "Some tools not found"
 
           # Test gcc directly
           echo "Testing gcc..."
-          "C:/tools/mingw64/bin/gcc.exe" --version || echo "gcc test failed"
+          "$MINGW_PATH/gcc.exe" --version || echo "gcc test failed"
 
           # Create the expected symlinks if they don't exist
-          cd "C:/tools/mingw64/bin"
+          cd "$MINGW_PATH"
           if [ ! -f "x86_64-w64-mingw32-gcc.exe" ]; then
             ln -sf gcc.exe x86_64-w64-mingw32-gcc.exe || cp gcc.exe x86_64-w64-mingw32-gcc.exe
           fi
