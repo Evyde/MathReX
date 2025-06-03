@@ -350,25 +350,59 @@ func onReady() {
 			log.Printf("Working directory: %s", wd)
 		}
 
+		// Check if setup scripts exist
+		setupBatExists := false
+		setupPyExists := false
+		if _, err := os.Stat("setup_windows_deps.bat"); err == nil {
+			log.Println("✓ setup_windows_deps.bat found")
+			setupBatExists = true
+		} else {
+			log.Printf("✗ setup_windows_deps.bat not found: %v", err)
+		}
+
+		if _, err := os.Stat("setup_windows_deps.py"); err == nil {
+			log.Println("✓ setup_windows_deps.py found")
+			setupPyExists = true
+		} else {
+			log.Printf("✗ setup_windows_deps.py not found: %v", err)
+		}
+
 		// Check if onnxruntime directory exists
+		onnxExists := false
 		if _, err := os.Stat("onnxruntime"); err == nil {
-			log.Println("onnxruntime directory found")
+			log.Println("✓ onnxruntime directory found")
 			if files, err := os.ReadDir("onnxruntime"); err == nil {
 				log.Printf("onnxruntime directory contents: %d files", len(files))
 				for _, file := range files {
 					log.Printf("  - %s", file.Name())
 				}
+				onnxExists = len(files) > 0
 			}
 		} else {
-			log.Printf("onnxruntime directory not found: %v", err)
+			log.Printf("✗ onnxruntime directory not found: %v", err)
 		}
 
 		// Check if libtokenizers directory exists
 		if _, err := os.Stat("libtokenizers"); err == nil {
-			log.Println("libtokenizers directory found")
+			log.Println("✓ libtokenizers directory found")
 		} else {
-			log.Printf("libtokenizers directory not found: %v", err)
+			log.Printf("✗ libtokenizers directory not found: %v", err)
 		}
+
+		// Show setup instructions if needed
+		if !onnxExists && (setupBatExists || setupPyExists) {
+			log.Println("=== SETUP REQUIRED ===")
+			log.Println("To enable image recognition, please run one of these setup scripts:")
+			if setupBatExists {
+				log.Println("  • Double-click setup_windows_deps.bat")
+			}
+			if setupPyExists {
+				log.Println("  • Run: python setup_windows_deps.py")
+			}
+			log.Println("These scripts will download the required ONNX runtime libraries.")
+			log.Println("=== END SETUP INSTRUCTIONS ===")
+		}
+
 		log.Println("=== End Windows Debug ===")
 	}
 

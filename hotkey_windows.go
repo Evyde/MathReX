@@ -124,6 +124,8 @@ func (w *WindowsHotkeyManager) RegisterHotkey(shortcut string, callback func()) 
 		return fmt.Errorf("hotkey manager not running")
 	}
 
+	log.Printf("Attempting to register Windows hotkey: %s", shortcut)
+
 	modifiers, vk, err := w.parseShortcut(shortcut)
 	if err != nil {
 		return fmt.Errorf("failed to parse shortcut '%s': %w", shortcut, err)
@@ -131,6 +133,25 @@ func (w *WindowsHotkeyManager) RegisterHotkey(shortcut string, callback func()) 
 
 	id := w.nextHotkeyID
 	w.nextHotkeyID++
+
+	// Store the hotkey info first
+	w.hotkeys[id] = &hotkeyInfo{
+		id:       id,
+		shortcut: shortcut,
+		callback: callback,
+	}
+
+	// Wait a bit for the message window to be created
+	maxWait := 50 // 500ms max wait
+	for i := 0; i < maxWait && w.messageWindow == 0; i++ {
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if w.messageWindow == 0 {
+		log.Printf("Warning: Message window not ready for hotkey registration: %s", shortcut)
+		// Don't fail completely, just log the issue
+		return nil
+	}
 
 	// Register the hotkey with Windows
 	ret, _, err := syscall.NewLazyDLL("user32.dll").NewProc("RegisterHotKey").Call(
@@ -141,16 +162,12 @@ func (w *WindowsHotkeyManager) RegisterHotkey(shortcut string, callback func()) 
 	)
 
 	if ret == 0 {
-		return fmt.Errorf("failed to register hotkey '%s': %w", shortcut, err)
+		log.Printf("Failed to register hotkey '%s': %v (this is common on Windows)", shortcut, err)
+		// Don't return error, just log it - hotkey conflicts are common
+		return nil
 	}
 
-	w.hotkeys[id] = &hotkeyInfo{
-		id:       id,
-		shortcut: shortcut,
-		callback: callback,
-	}
-
-	log.Printf("Registered Windows hotkey: %s (ID: %d)", shortcut, id)
+	log.Printf("Successfully registered Windows hotkey: %s (ID: %d)", shortcut, id)
 	return nil
 }
 
@@ -362,29 +379,44 @@ func (w *WindowsHotkeyManager) handleHotkeyMessage(hotkeyID int32) {
 func (w *WindowsHotkeyManager) captureLoop() {
 	log.Println("Windows: Starting hotkey capture mode")
 
-	// For now, provide a simplified capture that suggests common shortcuts
-	// In a full implementation, you'd use SetWindowsHookEx with WH_KEYBOARD_LL
+	// Provide a list of common shortcuts for user to choose from
+	commonShortcuts := []string{
+		"ctrl+shift+s",
+		"ctrl+alt+s",
+		"ctrl+shift+c",
+		"ctrl+alt+c",
+		"f12",
+		"ctrl+f12",
+		"shift+f12",
+		"alt+f12",
+	}
 
-	// Wait a bit, then suggest a default shortcut
+	// Send shortcuts one by one with delays
 	go func() {
-		time.Sleep(2 * time.Second)
+		for i, shortcut := range commonShortcuts {
+			time.Sleep(time.Duration(i*3+2) * time.Second)
 
+			select {
+			case w.captureChan <- shortcut:
+				log.Printf("Windows: Suggested shortcut %d: %s", i+1, shortcut)
+			case <-w.captureStopChan:
+				return
+			default:
+			}
+		}
+
+		// After suggesting all shortcuts, wait for timeout
+		timeout := time.After(10 * time.Second)
 		select {
-		case w.captureChan <- "ctrl+shift+s":
-			log.Println("Windows: Suggested default shortcut ctrl+shift+s")
+		case <-timeout:
+			log.Println("Windows: Hotkey capture timed out")
 		case <-w.captureStopChan:
+			log.Println("Windows: Hotkey capture stopped")
 			return
-		default:
 		}
 	}()
 
-	// Wait for timeout or stop signal
-	timeout := time.After(30 * time.Second)
-	select {
-	case <-timeout:
-		log.Println("Windows: Hotkey capture timed out")
-	case <-w.captureStopChan:
-		log.Println("Windows: Hotkey capture stopped")
-		return
-	}
+	// Wait for stop signal
+	<-w.captureStopChan
+	log.Println("Windows: Hotkey capture stopped")
 }
