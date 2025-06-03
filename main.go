@@ -23,7 +23,7 @@ import (
 	onnxruntime "github.com/yalue/onnxruntime_go"
 )
 
-//go:embed all:model katex.min.js mathml2omml.js
+//go:embed all:model katex.min.js mathml2omml.js icon.png icon.ico
 var embeddedFS embed.FS
 
 type AppSettings struct {
@@ -102,6 +102,38 @@ func extractAndGetPaths() (string, string, string, string, error) {
 
 func getDefaultSharedLibPath() string {
 	const onnxVersion = "1.21.0" // Align with download script and user feedback
+
+	// For macOS, check if we're running from an app bundle first
+	if runtime.GOOS == "darwin" {
+		execPath, err := os.Executable()
+		if err == nil {
+			// Check if we're in an app bundle
+			if strings.Contains(execPath, ".app/Contents/MacOS/") {
+				// We're in an app bundle, look for libraries in Resources
+				appBundlePath := filepath.Dir(filepath.Dir(execPath)) // Go up from MacOS to Contents
+				resourcesPath := filepath.Join(appBundlePath, "Resources", "onnxruntime")
+				var libName string
+				if runtime.GOARCH == "arm64" {
+					libName = fmt.Sprintf("libonnxruntime.%s.dylib", onnxVersion)
+				} else {
+					libName = fmt.Sprintf("libonnxruntime.%s.dylib", onnxVersion)
+				}
+				bundleLibPath := filepath.Join(resourcesPath, libName)
+				if _, err := os.Stat(bundleLibPath); err == nil {
+					log.Printf("Found ONNX runtime in app bundle: %s", bundleLibPath)
+					return bundleLibPath
+				}
+			}
+		}
+		// Fall back to relative path
+		if runtime.GOARCH == "arm64" {
+			return filepath.Join("onnxruntime", fmt.Sprintf("libonnxruntime.%s.dylib", onnxVersion))
+		}
+		if runtime.GOARCH == "amd64" {
+			return filepath.Join("onnxruntime", fmt.Sprintf("libonnxruntime.%s.dylib", onnxVersion))
+		}
+	}
+
 	if runtime.GOOS == "windows" {
 		if runtime.GOARCH == "amd64" {
 			// DLL name usually doesn't include version
@@ -112,14 +144,7 @@ func getDefaultSharedLibPath() string {
 			return filepath.Join("onnxruntime", "onnxruntime.dll")
 		}
 	}
-	if runtime.GOOS == "darwin" {
-		if runtime.GOARCH == "arm64" {
-			return filepath.Join("onnxruntime", fmt.Sprintf("libonnxruntime.%s.dylib", onnxVersion))
-		}
-		if runtime.GOARCH == "amd64" {
-			return filepath.Join("onnxruntime", fmt.Sprintf("libonnxruntime.%s.dylib", onnxVersion))
-		}
-	}
+
 	if runtime.GOOS == "linux" {
 		// Assuming .so for Linux, and versioned name similar to dylib
 		if runtime.GOARCH == "arm64" {
@@ -256,7 +281,14 @@ func onReady() {
 
 	log.Println("All core components initialized successfully.")
 
-	log.Println("Systray icon handling skipped as icon.png is not embedded.")
+	// Set systray icon
+	iconData, err := embeddedFS.ReadFile("icon.png")
+	if err != nil {
+		log.Printf("Warning: Could not read embedded icon: %v", err)
+	} else {
+		systray.SetIcon(iconData)
+		log.Println("Systray icon set successfully.")
+	}
 	systray.SetTitle("MathReX")
 	systray.SetTooltip("MathReX - Screenshot to Math")
 

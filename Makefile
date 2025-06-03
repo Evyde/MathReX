@@ -64,9 +64,22 @@ build-macos-app: build
 	@rm -rf bin/MathReX.app # Clean up previous bundle
 	@mkdir -p bin/MathReX.app/Contents/MacOS
 	@mkdir -p bin/MathReX.app/Contents/Resources
+	@mkdir -p bin/MathReX.app/Contents/Frameworks
 	@cp bin/MathReX-$(GOOS)-$(GOARCH) bin/MathReX.app/Contents/MacOS/MathReX
 	@cp Info.plist bin/MathReX.app/Contents/Info.plist
-	# If you have an icon file (e.g., AppIcon.icns in the same directory as Makefile):
-	# @cp AppIcon.icns bin/MathReX.app/Contents/Resources/AppIcon.icns
+	# Copy ONNX runtime library into the app bundle
+	@if [ -d "onnxruntime" ]; then \
+		echo "Copying ONNX runtime libraries to app bundle..."; \
+		cp -r onnxruntime bin/MathReX.app/Contents/Resources/; \
+	else \
+		echo "Warning: onnxruntime directory not found - app may not work without it"; \
+	fi
+	# Copy icon if available
+	@if [ -f "icon.icns" ]; then \
+		cp icon.icns bin/MathReX.app/Contents/Resources/AppIcon.icns; \
+	elif [ -f "icon_512.png" ]; then \
+		echo "Converting PNG to ICNS..."; \
+		sips -s format icns icon_512.png --out bin/MathReX.app/Contents/Resources/AppIcon.icns 2>/dev/null || echo "Could not convert icon"; \
+	fi
 	@echo "MathReX.app bundle created in bin/ directory."
 	@echo "Note: For distribution, the app may need to be code-signed and notarized."
