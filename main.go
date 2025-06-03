@@ -6,12 +6,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"image/png"
+	"io"
 	"io/ioutil"
 	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -232,102 +234,239 @@ func saveSettings() {
 }
 
 func main() {
+	// Set up logging to both console and file for debugging
+	logFile, err := os.OpenFile("mathrex_debug.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	if err != nil {
+		log.Printf("Warning: Could not create log file: %v", err)
+	} else {
+		defer logFile.Close()
+		log.SetOutput(io.MultiWriter(os.Stdout, logFile))
+	}
+
+	log.Println("=== MathReX Starting ===")
+	log.Printf("OS: %s, Arch: %s", runtime.GOOS, runtime.GOARCH)
+	log.Printf("Go version: %s", runtime.Version())
+
+	// Add panic recovery
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("PANIC RECOVERED: %v", r)
+			log.Printf("Stack trace: %s", debug.Stack())
+			if runtime.GOOS == "windows" {
+				log.Println("Press Enter to exit...")
+				fmt.Scanln()
+			}
+		}
+	}()
+
 	onExit := func() {
 		log.Println("MathReX onExit: Shutting down hotkey manager...")
 		ShutdownHotkeyManager()
 		log.Println("MathReX onExit: Systray cleanup.")
 		log.Println("MathReX application finished.")
 	}
+
+	log.Println("Starting systray...")
 	systray.Run(onReady, onExit)
 }
 
 func onReady() {
-	log.Println("MathReX is ready.")
+	log.Println("=== onReady() called ===")
+
+	// Add error recovery for onReady
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("PANIC in onReady: %v", r)
+			log.Printf("Stack trace: %s", debug.Stack())
+			if runtime.GOOS == "windows" {
+				log.Println("onReady panic - keeping app alive for debugging")
+				// Don't exit, just log the error
+			}
+		}
+	}()
+
+	log.Println("Loading settings...")
 	loadSettings()
+	log.Println("Settings loaded successfully")
 
 	// Initialize hotkey manager
+	log.Println("Initializing hotkey manager...")
 	err := InitializeHotkeyManager()
 	if err != nil {
 		log.Printf("Warning: Failed to initialize hotkey manager: %v", err)
+		// Don't exit on hotkey manager failure
+	} else {
+		log.Println("Hotkey manager initialized successfully")
 	}
 
+	log.Println("Extracting embedded files...")
 	extractedLibPath, extractedTokenizerPath, extractedEncoderPath, extractedDecoderPath, err := extractAndGetPaths()
+
+	var tempModelDir string
+	var modelsInitialized bool = false
+
 	if err != nil {
-		log.Fatalf("Failed to extract embedded files: %v", err)
-	}
-	tempModelDir := filepath.Dir(extractedTokenizerPath)
-	defer os.RemoveAll(filepath.Dir(extractedLibPath))
-	defer os.RemoveAll(tempModelDir)
+		log.Printf("ERROR: Failed to extract embedded files: %v", err)
+		if runtime.GOOS == "windows" {
+			log.Println("Continuing without ONNX runtime for debugging...")
+		} else {
+			log.Fatalf("Failed to extract embedded files: %v", err)
+		}
+	} else {
+		log.Printf("Files extracted successfully. Lib: %s", extractedLibPath)
 
-	onnxruntime.SetSharedLibraryPath(extractedLibPath)
-	if err := onnxruntime.InitializeEnvironment(); err != nil {
-		log.Fatalf("ONNX Init fail: %v", err)
+		tempModelDir = filepath.Dir(extractedTokenizerPath)
+		defer os.RemoveAll(filepath.Dir(extractedLibPath))
+		defer os.RemoveAll(tempModelDir)
+
+		log.Printf("Setting ONNX runtime library path: %s", extractedLibPath)
+		onnxruntime.SetSharedLibraryPath(extractedLibPath)
+
+		log.Println("Initializing ONNX runtime environment...")
+		if err := onnxruntime.InitializeEnvironment(); err != nil {
+			log.Printf("ERROR: ONNX Init fail: %v", err)
+			if runtime.GOOS == "windows" {
+				log.Println("Continuing without ONNX runtime for debugging...")
+			} else {
+				log.Fatalf("ONNX Init fail: %v", err)
+			}
+		} else {
+			log.Println("ONNX runtime initialized successfully")
+
+			log.Println("Initializing tokenizer...")
+			if err := model_controller.InitTokenizer(extractedTokenizerPath); err != nil {
+				log.Printf("ERROR: Tokenizer Init fail: %v", err)
+				if runtime.GOOS == "windows" {
+					log.Println("Continuing without tokenizer for debugging...")
+				} else {
+					log.Fatalf("Tokenizer Init fail: %v", err)
+				}
+			} else {
+				log.Println("Tokenizer initialized successfully")
+
+				log.Println("Initializing models...")
+				if err := model_controller.InitModels(extractedEncoderPath, extractedDecoderPath); err != nil {
+					log.Printf("ERROR: Models Init fail: %v", err)
+					if runtime.GOOS == "windows" {
+						log.Println("Continuing without models for debugging...")
+					} else {
+						log.Fatalf("Models Init fail: %v", err)
+					}
+				} else {
+					log.Println("Models initialized successfully")
+					modelsInitialized = true
+				}
+			}
+		}
 	}
 
-	if err := model_controller.InitTokenizer(extractedTokenizerPath); err != nil {
-		log.Fatalf("Tokenizer Init fail: %v", err)
+	log.Println("Initializing KaTeX...")
+	katexJSData, err := GetEmbeddedKaTeXJS()
+	if err != nil {
+		log.Printf("ERROR: Failed to get KaTeX JS: %v", err)
+		if runtime.GOOS != "windows" {
+			log.Fatalf("Failed to get embedded KaTeX JS: %v", err)
+		}
+	} else {
+		model_controller.InitKaTeX(katexJSData)
+		log.Println("KaTeX initialized successfully")
 	}
-	if err := model_controller.InitModels(extractedEncoderPath, extractedDecoderPath); err != nil {
-		log.Fatalf("Models Init fail: %v", err)
-	}
-	katexJSData, _ := GetEmbeddedKaTeXJS()
-	model_controller.InitKaTeX(katexJSData)
 
+	log.Println("Initializing MathML2OMML...")
 	mathml2ommlJSData, err := GetEmbeddedMathML2OMMLJS()
 	if err != nil || len(mathml2ommlJSData) == 0 {
-		log.Fatalf("Failed to get embedded mathml2omml.js: %v or data is empty", err)
+		log.Printf("ERROR: Failed to get embedded mathml2omml.js: %v or data is empty", err)
+		if runtime.GOOS != "windows" {
+			log.Fatalf("Failed to get embedded mathml2omml.js: %v or data is empty", err)
+		}
+	} else {
+		model_controller.InitMathML2OMMLJS(mathml2ommlJSData)
+		log.Println("MathML2OMML initialized successfully")
 	}
-	model_controller.InitMathML2OMMLJS(mathml2ommlJSData)
 
-	log.Println("All core components initialized successfully.")
+	if modelsInitialized {
+		log.Println("All core components initialized successfully.")
+	} else {
+		log.Println("Core components partially initialized (debugging mode).")
+	}
 
 	// Set systray icon
+	log.Println("Setting up systray...")
 	iconData, err := embeddedFS.ReadFile("icon.png")
 	if err != nil {
 		log.Printf("Warning: Could not read embedded icon: %v", err)
 	} else {
+		log.Printf("Icon data loaded, size: %d bytes", len(iconData))
 		systray.SetIcon(iconData)
 		log.Println("Systray icon set successfully.")
 	}
+
+	log.Println("Setting systray title and tooltip...")
 	systray.SetTitle("MathReX")
 	systray.SetTooltip("MathReX - Screenshot to Math")
+	log.Println("Systray title and tooltip set")
 
+	log.Println("Adding menu items...")
 	mCapture := systray.AddMenuItem("Capture & Recognize", "Capture a screen region via menu")
+	log.Println("Added Capture menu item")
 	mFromFile := systray.AddMenuItem("Recognize from File...", "Select an image file")
+	log.Println("Added From File menu item")
 	systray.AddSeparator()
+	log.Println("Added separator")
 
 	mOutputFormat := systray.AddMenuItem("Output Format", "Select output format")
+	log.Println("Added Output Format menu item")
 	mFormatLatex := mOutputFormat.AddSubMenuItemCheckbox("LaTeX", "LaTeX", currentSettings.OutputFormat == "latex")
 	mFormatMathML := mOutputFormat.AddSubMenuItemCheckbox("MathML", "MathML", currentSettings.OutputFormat == "mathml")
+	log.Println("Added format submenu items")
 
 	systray.AddSeparator()
 	mCaptureShortcut = systray.AddMenuItem(fmt.Sprintf("Capture Shortcut: %s", currentSettings.CaptureShortcut), "Current capture shortcut")
 	mCaptureShortcut.Disable()
+	log.Println("Added capture shortcut display item")
 
 	mSetShortcut := systray.AddMenuItem("Set Capture Shortcut...", "Set a new shortcut for capture")
+	log.Println("Added set shortcut menu item")
 
 	systray.AddSeparator()
 	mQuit := systray.AddMenuItem("Quit MathReX", "Exit the application")
+	log.Println("Added quit menu item")
 
 	// Register the capture hotkey
+	log.Println("Registering capture hotkey...")
 	registerCaptureHotkey()
+	log.Println("Hotkey registration completed")
 
+	log.Println("Starting event loop...")
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("PANIC in event loop: %v", r)
+				log.Printf("Stack trace: %s", debug.Stack())
+			}
+		}()
+
+		log.Println("Event loop started successfully")
 		for {
 			select {
 			case <-mCapture.ClickedCh:
+				log.Println("Capture menu clicked")
 				go handleCaptureAndRecognize()
 			case <-mFromFile.ClickedCh:
+				log.Println("From File menu clicked")
 				go handleRecognizeFromFile()
 			case <-mFormatLatex.ClickedCh:
+				log.Println("LaTeX format selected")
 				currentSettings.OutputFormat = "latex"
 				updateFormatCheckmarks(mFormatLatex, mFormatMathML)
 				saveSettings()
 			case <-mFormatMathML.ClickedCh:
+				log.Println("MathML format selected")
 				currentSettings.OutputFormat = "mathml"
 				updateFormatCheckmarks(mFormatLatex, mFormatMathML)
 				saveSettings()
 			case <-mSetShortcut.ClickedCh:
+				log.Println("Set Shortcut menu clicked")
 				go handleChangeShortcutGUI()
 			case <-mQuit.ClickedCh:
 				log.Println("Quit menu item clicked. Shutting down...")
@@ -336,6 +475,21 @@ func onReady() {
 			}
 		}
 	}()
+
+	log.Println("=== onReady() completed successfully ===")
+	if runtime.GOOS == "windows" {
+		log.Println("Windows: Application should now be visible in system tray")
+		log.Println("Windows: If you see this message, the app started successfully!")
+		log.Println("Windows: Check your system tray for the MathReX icon")
+
+		// Keep a debug goroutine running to prevent exit
+		go func() {
+			for {
+				time.Sleep(30 * time.Second)
+				log.Println("Windows debug: App is still running...")
+			}
+		}()
+	}
 }
 
 func registerCaptureHotkey() {
