@@ -224,18 +224,27 @@ jobs:
           # Create output directory
           mkdir -p bin
 
-          # Set up MSVC environment for CGO
+          # Set up MSVC environment using vcvars64.bat
           echo "Setting up MSVC environment for CGO..."
-          export CC="cl.exe"
-          export CXX="cl.exe"
 
-          # Build with MSVC-compatible settings
-          echo "Building with CGO enabled and MSVC-compatible tokenizers..."
-          echo "Using CGO_LDFLAGS: $CGO_LDFLAGS"
+          # Find and source MSVC environment
+          VCVARS_PATH="C:/Program Files/Microsoft Visual Studio/2022/Enterprise/VC/Auxiliary/Build/vcvars64.bat"
+          if [ ! -f "$VCVARS_PATH" ]; then
+            echo "Trying alternative MSVC paths..."
+            VCVARS_PATH="C:/Program Files (x86)/Microsoft Visual Studio/2019/Enterprise/VC/Auxiliary/Build/vcvars64.bat"
+          fi
 
-          go build -o bin/MathReX-windows-amd64.exe ./
+          if [ -f "$VCVARS_PATH" ]; then
+            echo "Found MSVC at: $VCVARS_PATH"
+            # Use cmd to run vcvars and then go build
+            cmd.exe //c "\"$VCVARS_PATH\" && go build -o bin/MathReX-windows-amd64.exe ./"
+          else
+            echo "MSVC not found, trying with default MinGW..."
+            # Fallback to MinGW if MSVC not available
+            go build -o bin/MathReX-windows-amd64.exe ./
+          fi
 
-          echo "✓ Windows build successful with MSVC-compatible tokenizers"
+          echo "✓ Windows build completed"
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
