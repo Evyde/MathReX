@@ -38,7 +38,7 @@ jobs:
             goos: windows
             goarch: amd64
             asset_name_suffix: .exe
-            rust_target: x86_64-pc-windows-gnu
+            rust_target: x86_64-pc-windows-msvc
           # Windows ARM64 is more complex to set up for Rust cross-compilation, skipping for now.
           # - os: windows-latest
           #   goos: windows
@@ -70,18 +70,7 @@ jobs:
           toolchain: stable
           targets: ${{ matrix.rust_target }} # Ensure the target for cross-compilation is installed
 
-      - name: Install MinGW for Windows GNU target
-        if: matrix.goos == 'windows'
-        shell: bash
-        run: |
-          echo "Installing MinGW-w64 for Windows GNU target..."
-          # Use chocolatey to install mingw
-          choco install mingw -y
-          # Add MinGW to PATH
-          echo "C:/tools/mingw64/bin" >> $GITHUB_PATH
-          # Verify installation
-          echo "Checking MinGW installation..."
-          ls -la "C:/tools/mingw64/bin/" || echo "MinGW directory not found"
+
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -112,14 +101,11 @@ jobs:
 
           echo "Building libtokenizers with Cargo for target ${{ matrix.rust_target }}..."
 
-          # For Windows, set specific environment for GNU toolchain
+          # For Windows, set specific environment for MSVC toolchain
           if [[ "${{ matrix.goos }}" == "windows" ]]; then
-            echo "Setting Windows-specific Rust build environment for GNU toolchain..."
-            # Use GNU toolchain to be compatible with Go's MinGW linker
-            export CC=x86_64-w64-mingw32-gcc
-            export CXX=x86_64-w64-mingw32-g++
-            export AR=x86_64-w64-mingw32-ar
-            export RUSTFLAGS="-C target-feature=+crt-static -C linker=x86_64-w64-mingw32-gcc"
+            echo "Setting Windows-specific Rust build environment for MSVC toolchain..."
+            # Use MSVC toolchain - no need to set CC/CXX/AR as MSVC is the default
+            export RUSTFLAGS="-C target-feature=+crt-static"
           fi
 
           cargo build --release --target ${{ matrix.rust_target }}
@@ -233,23 +219,23 @@ jobs:
         if: matrix.goos == 'windows'
         shell: bash
         run: |
-          echo "Building Windows application with fixed tokenizers and hotkey implementation..."
+          echo "Building Windows application with MSVC-compatible tokenizers..."
 
           # Create output directory
           mkdir -p bin
 
-          # Build with the new implementations
-          echo "Building with CGO enabled and Windows-compatible tokenizers (GNU)..."
-          # For Windows, we need to statically link C++ standard library to avoid libstdc++-6.dll dependency
+          # Set up MSVC environment for CGO
+          echo "Setting up MSVC environment for CGO..."
+          export CC="cl.exe"
+          export CXX="cl.exe"
+
+          # Build with MSVC-compatible settings
+          echo "Building with CGO enabled and MSVC-compatible tokenizers..."
           echo "Using CGO_LDFLAGS: $CGO_LDFLAGS"
 
-          # Add static linking flags for C++ standard library
-          STATIC_LDFLAGS="$CGO_LDFLAGS -static-libgcc -static-libstdc++"
-          echo "Enhanced CGO_LDFLAGS with static linking: $STATIC_LDFLAGS"
+          go build -o bin/MathReX-windows-amd64.exe ./
 
-          CGO_LDFLAGS="$STATIC_LDFLAGS" go build -o bin/MathReX-windows-amd64.exe ./
-
-          echo "✓ Windows build successful with fixed tokenizers and hotkey implementations"
+          echo "✓ Windows build successful with MSVC-compatible tokenizers"
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
