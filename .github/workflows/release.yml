@@ -38,7 +38,7 @@ jobs:
             goos: windows
             goarch: amd64
             asset_name_suffix: .exe
-            rust_target: x86_64-pc-windows-msvc
+            rust_target: x86_64-pc-windows-gnu
           # Windows ARM64 is more complex to set up for Rust cross-compilation, skipping for now.
           # - os: windows-latest
           #   goos: windows
@@ -69,6 +69,25 @@ jobs:
         with:
           toolchain: stable
           targets: ${{ matrix.rust_target }} # Ensure the target for cross-compilation is installed
+
+      - name: Install MinGW-w64 for Windows GNU target
+        if: matrix.goos == 'windows'
+        shell: bash
+        run: |
+          echo "Installing MinGW-w64 for Windows GNU target..."
+          # Install MSYS2 which provides a complete MinGW-w64 toolchain
+          choco install msys2 -y
+
+          # Update MSYS2 and install MinGW-w64 toolchain
+          C:/tools/msys64/usr/bin/bash.exe -lc "pacman -Syu --noconfirm"
+          C:/tools/msys64/usr/bin/bash.exe -lc "pacman -S --noconfirm mingw-w64-x86_64-toolchain"
+
+          # Add MinGW-w64 to PATH
+          echo "C:/tools/msys64/mingw64/bin" >> $GITHUB_PATH
+
+          # Verify installation
+          echo "Verifying MinGW-w64 installation..."
+          ls -la "C:/tools/msys64/mingw64/bin/" | grep -E "(gcc|g\+\+|ar)\.exe" || echo "Some tools not found"
 
 
 
@@ -101,11 +120,20 @@ jobs:
 
           echo "Building libtokenizers with Cargo for target ${{ matrix.rust_target }}..."
 
-          # For Windows, set specific environment for MSVC toolchain
+          # For Windows, set specific environment for GNU toolchain
           if [[ "${{ matrix.goos }}" == "windows" ]]; then
-            echo "Setting Windows-specific Rust build environment for MSVC toolchain..."
-            # Use MSVC toolchain - no need to set CC/CXX/AR as MSVC is the default
-            export RUSTFLAGS="-C target-feature=+crt-static"
+            echo "Setting Windows-specific Rust build environment for GNU toolchain..."
+            # Use MinGW-w64 GNU toolchain for compatibility with Go's linker
+            export CC=x86_64-w64-mingw32-gcc
+            export CXX=x86_64-w64-mingw32-g++
+            export AR=x86_64-w64-mingw32-ar
+            export RUSTFLAGS="-C target-feature=+crt-static -C linker=x86_64-w64-mingw32-gcc"
+
+            # Verify tools are available
+            echo "Verifying GNU toolchain..."
+            which x86_64-w64-mingw32-gcc || echo "gcc not found"
+            which x86_64-w64-mingw32-g++ || echo "g++ not found"
+            which x86_64-w64-mingw32-ar || echo "ar not found"
           fi
 
           cargo build --release --target ${{ matrix.rust_target }}
@@ -219,20 +247,25 @@ jobs:
         if: matrix.goos == 'windows'
         shell: bash
         run: |
-          echo "Building Windows application with MSVC-compatible tokenizers..."
+          echo "Building Windows application with GNU-compatible tokenizers..."
 
           # Create output directory
           mkdir -p bin
 
-          # Since we have MSVC-compiled tokenizers, we need to use a compatible linker
-          # Let's try using the default Windows toolchain which should work with MSVC libraries
-          echo "Building with default Windows toolchain..."
+          # Set up GNU toolchain environment for CGO
+          echo "Setting up GNU toolchain for CGO..."
+          export CC=x86_64-w64-mingw32-gcc
+          export CXX=x86_64-w64-mingw32-g++
+
+          # Add static linking flags for C++ standard library to avoid runtime dependencies
           echo "Using CGO_LDFLAGS: $CGO_LDFLAGS"
+          STATIC_LDFLAGS="$CGO_LDFLAGS -static-libgcc -static-libstdc++"
+          echo "Enhanced CGO_LDFLAGS with static linking: $STATIC_LDFLAGS"
 
-          # Build the application
-          go build -o bin/MathReX-windows-amd64.exe ./
+          # Build the application with GNU toolchain
+          CGO_LDFLAGS="$STATIC_LDFLAGS" go build -o bin/MathReX-windows-amd64.exe ./
 
-          echo "✓ Windows build completed"
+          echo "✓ Windows build completed with GNU toolchain"
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
