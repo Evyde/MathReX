@@ -60,9 +60,17 @@ func extractAndGetPaths() (string, string, string, string, error) {
 		return "", "", "", "", fmt.Errorf("failed to create model temp dir: %w", err)
 	}
 
-	// For now, we'll use a placeholder for the library path since we removed onnxruntime embedding
-	// This will need to be handled differently for each platform
-	extractedLibPath := ""
+	// Use runtime-downloaded ONNX library instead of embedded one
+	extractedLibPath := getDefaultSharedLibPath()
+	if extractedLibPath == "" {
+		return "", "", "", "", fmt.Errorf("could not determine library path for %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+
+	// Check if the library file exists
+	if _, err := os.Stat(extractedLibPath); os.IsNotExist(err) {
+		return "", "", "", "", fmt.Errorf("ONNX runtime library not found at %s. Please ensure download_onnxruntime.py has been run", extractedLibPath)
+	}
+	log.Printf("Using ONNX runtime library at: %s\n", extractedLibPath)
 
 	modelFiles := []string{"encoder_model.onnx", "decoder_model.onnx", "tokenizer.json"}
 	var extractedTokenizerPath, extractedEncoderPath, extractedDecoderPath string
@@ -90,6 +98,37 @@ func extractAndGetPaths() (string, string, string, string, error) {
 		return "", "", "", "", fmt.Errorf("one or more critical model files not found")
 	}
 	return extractedLibPath, extractedTokenizerPath, extractedEncoderPath, extractedDecoderPath, nil
+}
+
+func getDefaultSharedLibPath() string {
+	const onnxVersion = "1.21.0" // Align with download script and user feedback
+	if runtime.GOOS == "windows" {
+		if runtime.GOARCH == "amd64" {
+			// DLL name usually doesn't include version
+			return filepath.Join("onnxruntime", "onnxruntime.dll")
+		}
+		if runtime.GOARCH == "arm64" {
+			// DLL name usually doesn't include version
+			return filepath.Join("onnxruntime", "onnxruntime.dll")
+		}
+	}
+	if runtime.GOOS == "darwin" {
+		if runtime.GOARCH == "arm64" {
+			return filepath.Join("onnxruntime", fmt.Sprintf("libonnxruntime.%s.dylib", onnxVersion))
+		}
+		if runtime.GOARCH == "amd64" {
+			return filepath.Join("onnxruntime", fmt.Sprintf("libonnxruntime.%s.dylib", onnxVersion))
+		}
+	}
+	if runtime.GOOS == "linux" {
+		// Assuming .so for Linux, and versioned name similar to dylib
+		if runtime.GOARCH == "arm64" {
+			return filepath.Join("onnxruntime", fmt.Sprintf("libonnxruntime.%s.so", onnxVersion))
+		}
+		return filepath.Join("onnxruntime", fmt.Sprintf("libonnxruntime.%s.so", onnxVersion))
+	}
+	log.Printf("Error: Unable to determine onnxruntime path for OS=%s Arch=%s\n", runtime.GOOS, runtime.GOARCH)
+	return ""
 }
 
 func getDefaultShortcut() string {
@@ -195,13 +234,10 @@ func onReady() {
 	defer os.RemoveAll(filepath.Dir(extractedLibPath))
 	defer os.RemoveAll(tempModelDir)
 
-	// Initialize ONNX runtime
-	err = onnxruntime.InitializeEnvironment()
-	if err != nil {
-		log.Fatalf("Failed to initialize ONNX runtime: %v", err)
+	onnxruntime.SetSharedLibraryPath(extractedLibPath)
+	if err := onnxruntime.InitializeEnvironment(); err != nil {
+		log.Fatalf("ONNX Init fail: %v", err)
 	}
-	defer onnxruntime.DestroyEnvironment()
-	log.Println("ONNX runtime initialized successfully.")
 
 	if err := model_controller.InitTokenizer(extractedTokenizerPath); err != nil {
 		log.Fatalf("Tokenizer Init fail: %v", err)

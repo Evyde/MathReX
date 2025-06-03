@@ -288,13 +288,13 @@ jobs:
           export CC=x86_64-w64-mingw32-gcc
           export CXX=x86_64-w64-mingw32-g++
 
-          # Add static linking flags for C++ standard library to avoid runtime dependencies
+          # Add comprehensive static linking flags to avoid runtime dependencies
           echo "Using CGO_LDFLAGS: $CGO_LDFLAGS"
-          STATIC_LDFLAGS="$CGO_LDFLAGS -static-libgcc -static-libstdc++ -lstdc++"
+          STATIC_LDFLAGS="$CGO_LDFLAGS -static-libgcc -static-libstdc++ -static -lstdc++ -lwinpthread"
           echo "Enhanced CGO_LDFLAGS with static linking: $STATIC_LDFLAGS"
 
-          # Build the application with GNU toolchain
-          CGO_LDFLAGS="$STATIC_LDFLAGS" go build -o bin/MathReX-windows-amd64.exe ./
+          # Build the application with GNU toolchain and static linking
+          CGO_LDFLAGS="$STATIC_LDFLAGS" go build -ldflags "-linkmode external -extldflags '-static'" -o bin/MathReX-windows-amd64.exe ./
 
           echo "✓ Windows build completed with GNU toolchain"
         env:

@@ -10,7 +10,6 @@ require (
 	github.com/getlantern/systray v1.2.2
 	github.com/kbinani/screenshot v0.0.0-20250118074034-a3924b7bbc8c
 	github.com/nfnt/resize v0.0.0-20180221191011-83c6a9932646
-	github.com/robotn/gohook v0.42.1
 	github.com/sqweek/dialog v0.0.0-20240226140203-065105509627
 	github.com/yalue/onnxruntime_go v1.19.0
 	golang.org/x/sys v0.33.0
@@ -34,7 +33,6 @@ require (
 	github.com/lxn/win v0.0.0-20210218163916-a377121e959e // indirect
 	github.com/oxtoacart/bpool v0.0.0-20190530202638-03653db5a59c // indirect
 	github.com/stretchr/testify v1.9.0 // indirect
-	github.com/vcaesar/keycode v0.10.1 // indirect
 	golang.org/x/image v0.25.0 // indirect
 	golang.org/x/text v0.23.0 // indirect
 )
