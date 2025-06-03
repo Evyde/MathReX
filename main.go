@@ -645,17 +645,28 @@ func processImageFile(imagePath string) {
 	if err != nil {
 		log.Printf("Failed to process image prediction: %v", err)
 
-		// Provide more helpful error message for Windows users
-		errorMsg := fmt.Sprintf("Failed to process image: %v", err)
+		// Provide more helpful error message and alternative for Windows users
 		if runtime.GOOS == "windows" && strings.Contains(err.Error(), "not initialized") {
-			errorMsg = "Image recognition is not available in this debug version.\n\n" +
-				"This is because the ONNX runtime and models are not properly initialized on Windows.\n" +
-				"The application is running in debug mode to help identify startup issues.\n\n" +
-				"Original error: " + err.Error()
-		}
+			errorMsg := "Image recognition is not available in this debug version.\n\n" +
+				"To enable full functionality, please run one of these setup scripts:\n" +
+				"• setup_windows_deps.bat (Windows batch file)\n" +
+				"• setup_windows_deps.py (Python script)\n\n" +
+				"These scripts will download the required ONNX runtime libraries.\n\n" +
+				"For now, I'll copy the image path to clipboard so you can use it elsewhere."
 
-		dialog.Message(errorMsg).Title("Error").Error()
-		return
+			dialog.Message(errorMsg).Title("Setup Required").Info()
+
+			// Copy image path to clipboard as a fallback
+			if err := clipboard.WriteAll(imagePath); err == nil {
+				log.Printf("Copied image path to clipboard: %s", imagePath)
+				dialog.Message(fmt.Sprintf("Image saved to:\n%s\n\nPath copied to clipboard!", imagePath)).Title("Image Captured").Info()
+			}
+			return
+		} else {
+			errorMsg := fmt.Sprintf("Failed to process image: %v", err)
+			dialog.Message(errorMsg).Title("Error").Error()
+			return
+		}
 	}
 
 	err = clipboard.WriteAll(resultText)

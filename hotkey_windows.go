@@ -76,16 +76,14 @@ func (w *WindowsHotkeyManager) Start() error {
 		return nil
 	}
 
-	// Create a message-only window for receiving hotkey messages
-	err := w.createMessageWindow()
-	if err != nil {
-		return fmt.Errorf("failed to create message window: %w", err)
-	}
-
 	w.running = true
 
 	// Start message loop in a separate goroutine
+	// The message window will be created in the same thread as the message loop
 	go w.messageLoop()
+
+	// Wait a bit for the message loop to start and create the window
+	time.Sleep(100 * time.Millisecond)
 
 	log.Println("Windows hotkey manager started")
 	return nil
@@ -290,6 +288,13 @@ func (w *WindowsHotkeyManager) messageLoop() {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
+	// Create the message window in this thread
+	err := w.createMessageWindow()
+	if err != nil {
+		log.Printf("Failed to create message window in message loop: %v", err)
+		return
+	}
+
 	user32 := syscall.NewLazyDLL("user32.dll")
 	peekMessage := user32.NewProc("PeekMessageW")
 	translateMessage := user32.NewProc("TranslateMessage")
@@ -318,10 +323,10 @@ func (w *WindowsHotkeyManager) messageLoop() {
 			// Check for messages
 			ret, _, _ := peekMessage.Call(
 				uintptr(unsafe.Pointer(&msg)),
-				0, // hWnd (0 = all windows for this thread)
-				0, // wMsgFilterMin
-				0, // wMsgFilterMax
-				1, // wRemoveMsg (PM_REMOVE)
+				uintptr(w.messageWindow), // Use our specific window handle
+				0,                        // wMsgFilterMin
+				0,                        // wMsgFilterMax
+				1,                        // wRemoveMsg (PM_REMOVE)
 			)
 
 			if ret != 0 {
