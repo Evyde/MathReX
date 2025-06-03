@@ -70,6 +70,19 @@ jobs:
           toolchain: stable
           targets: ${{ matrix.rust_target }} # Ensure the target for cross-compilation is installed
 
+      - name: Install MinGW for Windows GNU target
+        if: matrix.goos == 'windows'
+        shell: bash
+        run: |
+          echo "Installing MinGW-w64 for Windows GNU target..."
+          # Use chocolatey to install mingw
+          choco install mingw -y
+          # Add MinGW to PATH
+          echo "C:/tools/mingw64/bin" >> $GITHUB_PATH
+          # Verify installation
+          echo "Checking MinGW installation..."
+          ls -la "C:/tools/mingw64/bin/" || echo "MinGW directory not found"
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
